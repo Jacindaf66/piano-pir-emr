@@ -1,0 +1,1692 @@
+from fastapi import APIRouter, HTTPException, Depends, status, Body
+from fastapi.security import OAuth2PasswordBearer
+import numpy as np
+import json
+import os
+import requests
+import time
+
+from dotenv import load_dotenv
+from sqlalchemy.orm import Session
+from jose import JWTError, jwt
+from typing import Optional
+from pydantic import BaseModel
+from fastapi.responses import Response
+from fastapi import Request
+from pydantic import BaseModel
+
+from .database import get_db
+from .models import User, Role
+from .security import hash_password, verify_password, create_token, SECRET_KEY, ALGORITHM
+from pydantic import BaseModel
+from typing import Optional
+from datetime import date
+
+import sqlite3
+import os
+import json
+from datetime import datetime, timedelta
+import random
+# ======================
+# 定义 BASE_DIR
+# ======================
+BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+
+# 导入 PIR 核心
+from core.piano_core import PianoServer
+
+router = APIRouter()
+
+# 加载环境变量
+load_dotenv()
+
+# ======================
+# 初始化 PIR 数据
+# ======================
+BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+NPY_PATH = os.path.join(BASE_DIR, 'storage', 'db.npy')
+META_PATH = os.path.join(BASE_DIR, 'storage', 'metadata.json')
+
+# 检查 PIR 数据文件是否存在
+if os.path.exists(NPY_PATH) and os.path.exists(META_PATH):
+    try:
+        db_matrix = np.load(NPY_PATH)
+        with open(META_PATH, 'r', encoding='utf-8') as f:
+            metadata = json.load(f)
+        server = PianoServer([row.tobytes() for row in db_matrix])
+        BLOCK_SIZE = db_matrix.shape[1]
+        DB_SIZE = db_matrix.shape[0]
+        print(f"✅ PIR 数据加载成功: {DB_SIZE} 条记录")
+    except Exception as e:
+        print(f"⚠️ PIR 数据加载失败: {e}")
+        db_matrix = None
+        server = None
+        BLOCK_SIZE = 0
+        DB_SIZE = 0
+else:
+    print(f"⚠️ PIR 数据文件不存在，请先运行数据生成脚本")
+    db_matrix = None
+    server = None
+    BLOCK_SIZE = 0
+    DB_SIZE = 0
+
+
+# 加载预处理表
+PIANO_TABLES_PATH = os.path.join(BASE_DIR, 'storage', 'piano_tables.json')
+piano_tables = None
+if os.path.exists(PIANO_TABLES_PATH):
+    with open(PIANO_TABLES_PATH, 'r') as f:
+        piano_tables = json.load(f)
+    print(f"✅ 加载 PIANO 预处理表: M1={piano_tables['params']['M1']}, M2={piano_tables['params']['M2']}")
+
+class AIChatRequest(BaseModel):
+    messages: list
+    model: str = "deepseek"  # deepseek 或 doubao
+
+
+class AIAssistant:
+    """AI 助手类，支持豆包和 DeepSeek"""
+    
+    def __init__(self):
+        # 豆包配置
+        self.doubao_api_key = "91be1b79-0621-44a1-a725-a59462602582"
+        self.doubao_base_url = "https://ark.cn-beijing.volces.com/api/v3/"
+        self.doubao_model = "doubao-seed-1-6-250615"
+        
+        # DeepSeek 配置
+        self.deepseek_api_key = "sk-edmctfrdmjllptnrkqyqlwhunenwdhaqgzcfxzkkcvadvesp"
+        self.deepseek_base_url = "https://api.siliconflow.cn/v1"
+        self.deepseek_model = "deepseek-ai/DeepSeek-V3"
+    
+    def call_doubao(self, messages):
+        """调用豆包 API"""
+        headers = {
+            "Authorization": f"Bearer {self.doubao_api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": self.doubao_model,
+            "messages": messages,
+            "temperature": 0.7,
+            "max_tokens": 2000
+        }
+        try:
+            response = requests.post(
+                f"{self.doubao_base_url}chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=60
+            )
+            if response.status_code == 200:
+                return response.json()["choices"][0]["message"]["content"]
+            else:
+                print(f"豆包API错误: {response.status_code}")
+                return None
+        except Exception as e:
+            print(f"豆包调用失败: {e}")
+            return None
+    
+    def call_deepseek(self, messages):
+        """调用 DeepSeek API"""
+        headers = {
+            "Authorization": f"Bearer {self.deepseek_api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": self.deepseek_model,
+            "messages": messages,
+            "temperature": 0.7,
+            "max_tokens": 2000,
+            "stream": False
+        }
+        try:
+            response = requests.post(
+                f"{self.deepseek_base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=60
+            )
+            if response.status_code == 200:
+                return response.json()["choices"][0]["message"]["content"]
+            else:
+                print(f"DeepSeek API错误: {response.status_code}")
+                return None
+        except Exception as e:
+            print(f"DeepSeek调用失败: {e}")
+            return None
+
+   
+
+class AIDiagnoseRequest(BaseModel):
+    messages: list
+    model: str = "doubao"  # doubao 或 deepseek
+
+# ======================
+# 请求/响应模型
+# ======================
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    name: str
+    department: str
+
+class LoginResponse(BaseModel):
+    token: str
+    username: str
+    name: str
+    role: str
+    department: Optional[str] = None
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    name: str
+    role: str
+    department: Optional[str] = None
+
+# OAuth2 配置
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login", auto_error=False)
+
+# ======================
+# 辅助函数
+# ======================
+
+def get_current_user(token: Optional[str] = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    """从 token 获取当前用户"""
+    if not token:
+        return None
+    
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            return None
+    except JWTError:
+        return None
+    
+    user = db.query(User).filter(User.username == username).first()
+    return user
+
+def get_current_user_required(current_user: User = Depends(get_current_user)):
+    """要求必须登录"""
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="请先登录",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return current_user
+
+# ======================
+# 公开接口（无需登录）
+# ======================
+
+@router.post("/login", response_model=LoginResponse)
+def login(request: LoginRequest, db: Session = Depends(get_db)):
+    """用户登录"""
+    print(f"[登录] 尝试: {request.username}")
+    
+    user = db.query(User).filter(User.username == request.username).first()
+    
+    if not user:
+        print(f"[登录失败] 用户不存在: {request.username}")
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    
+    if not verify_password(request.password, user.password):
+        print(f"[登录失败] 密码错误: {request.username}")
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    
+    token = create_token({
+        "sub": user.username,
+        "role": user.role.value,
+        "name": user.name
+    })
+    
+    print(f"[登录成功] {user.username} ({user.role.value})")
+    
+    return LoginResponse(
+        token=token,
+        username=user.username,
+        name=user.name,
+        role=user.role.value,
+        department=user.department
+    )
+
+@router.post("/register")
+def register(request: RegisterRequest, db: Session = Depends(get_db)):
+    """医生自助注册"""
+    print(f"[注册] 尝试: {request.username}")
+    
+    existing = db.query(User).filter(User.username == request.username).first()
+    if existing:
+        print(f"[注册失败] 用户名已存在: {request.username}")
+        raise HTTPException(status_code=400, detail="用户名已存在")
+    
+    if len(request.password) < 6:
+        raise HTTPException(status_code=400, detail="密码长度至少6位")
+    
+    try:
+        new_user = User(
+            username=request.username,
+            password=hash_password(request.password),
+            name=request.name,
+            role=Role.DOCTOR,
+            department=request.department
+        )
+        
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        
+        print(f"[注册成功] {request.username} (医生, {request.department})")
+        
+        return {
+            "success": True,
+            "message": "注册成功，请登录",
+            "username": request.username,
+            "name": request.name
+        }
+        
+    except Exception as e:
+        db.rollback()
+        print(f"[注册失败] 数据库错误: {e}")
+        raise HTTPException(status_code=500, detail="注册失败，请稍后重试")
+
+# ======================
+# 需要登录的接口
+# ======================
+
+@router.get("/user/me", response_model=UserResponse)
+def get_me(current_user: User = Depends(get_current_user_required)):
+    """获取当前用户信息"""
+    return UserResponse(
+        id=current_user.id,
+        username=current_user.username,
+        name=current_user.name,
+        role=current_user.role.value,
+        department=current_user.department
+    )
+
+@router.post("/admin/create-user")
+def admin_create_user(
+    request: RegisterRequest,
+    current_user: User = Depends(get_current_user_required),
+    db: Session = Depends(get_db)
+):
+    """管理员创建用户"""
+    if current_user.role != Role.ADMIN:
+        raise HTTPException(status_code=403, detail="无权限")
+    
+    existing = db.query(User).filter(User.username == request.username).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="用户名已存在")
+    
+    new_user = User(
+        username=request.username,
+        password=hash_password(request.password),
+        name=request.name,
+        role=Role.DOCTOR,
+        department=request.department
+    )
+    
+    db.add(new_user)
+    db.commit()
+    
+    return {"message": f"用户 {request.username} 创建成功"}
+
+# ======================
+# PIR 查询接口（需要登录）
+# ======================
+
+@router.get("/meta")
+def get_meta(current_user: User = Depends(get_current_user_required)):
+    """获取数据库元数据"""
+    if db_matrix is None:
+        raise HTTPException(status_code=503, detail="数据库未初始化")
+    return {
+        "db_size": DB_SIZE,
+        "block_size": BLOCK_SIZE,
+        "records_count": len(metadata) if metadata else 0
+    }
+
+@router.get("/hint")
+def get_hint(sample_size: int = 10, current_user: User = Depends(get_current_user_required)):
+    """获取样本数据提示"""
+    if db_matrix is None:
+        raise HTTPException(status_code=503, detail="数据库未初始化")
+    sample_size = min(sample_size, DB_SIZE)
+    indices = np.random.choice(DB_SIZE, sample_size, replace=False)
+    hints = {str(i): db_matrix[i].tolist() for i in indices}
+    return hints
+
+# @router.post("/query")
+# def post_query(query: bytes, current_user: User = Depends(get_current_user_required)):
+#     """执行 PIR 查询"""
+#     if server is None:
+#         raise HTTPException(status_code=503, detail="PIR服务未初始化")
+#     try:
+#         answer = server.process_query(query)
+#         return {"answer": answer}
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/query")
+async def post_query(
+    request: Request,
+    current_user: User = Depends(get_current_user_required)
+):
+    """
+    执行 PIR 查询
+    接收二进制数据作为 query seed
+    """
+    if server is None:
+        raise HTTPException(status_code=503, detail="PIR服务未初始化")
+    
+    try:
+        # 从请求体中读取二进制数据
+        query_seed = await request.body()
+        
+        if not query_seed:
+            raise HTTPException(status_code=400, detail="空的查询数据")
+        
+        print(f"[API] 收到查询，seed 大小: {len(query_seed)} bytes")
+        
+        # 调用 PianoServer 处理查询
+        result = server.process_query(query_seed)
+        
+        # 返回二进制结果
+        return Response(content=result, media_type="application/octet-stream")
+        
+    except Exception as e:
+        print(f"[API] PIR查询错误: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+# ======================
+# 医生专用接口
+# ======================
+
+@router.get("/doctor/dashboard")
+def doctor_dashboard(current_user: User = Depends(get_current_user_required)):
+    """医生仪表盘数据"""
+    if current_user.role != Role.DOCTOR and current_user.role != Role.ADMIN:
+        raise HTTPException(status_code=403, detail="仅医生可访问")
+    
+    return {
+        "total_records": 1240,
+        "today_new": 32,
+        "pending_audit": 12,
+        "pass_rate": "96.2%",
+        "archive_rate": "91.8%"
+    }
+
+@router.get("/stats/overall")
+def get_overall_stats(current_user: User = Depends(get_current_user_required), db: Session = Depends(get_db)):
+    """获取总体统计（仅管理员）"""
+    if current_user.role != Role.ADMIN:
+        raise HTTPException(status_code=403, detail="无权限")
+    
+    import sqlite3
+    import os
+    from datetime import datetime, timedelta
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    today = datetime.now().strftime('%Y-%m-%d')
+    month_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    
+    # 总病历数
+    cursor.execute("SELECT COUNT(*) FROM records")
+    total_records = cursor.fetchone()[0]
+    
+    # 今日新增
+    cursor.execute("SELECT COUNT(*) FROM records WHERE admission_date = ?", (today,))
+    today_new = cursor.fetchone()[0]
+    
+    # 本月新增
+    cursor.execute("SELECT COUNT(*) FROM records WHERE admission_date >= ?", (month_ago,))
+    month_new = cursor.fetchone()[0]
+    
+    # 医生总数
+    cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'DOCTOR'")
+    doctor_count = cursor.fetchone()[0]
+    
+    conn.close()
+    
+    return {
+        "total_records": total_records,
+        "doctor_count": doctor_count,
+        "today_new": today_new,
+        "month_new": month_new
+    }
+
+
+@router.get("/stats/department")
+def get_department_stats_detailed(current_user: User = Depends(get_current_user_required), db: Session = Depends(get_db)):
+    """获取科室详细统计（包含今日和本月新增）"""
+    import sqlite3
+    import os
+    from datetime import datetime, timedelta
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    today = datetime.now().strftime('%Y-%m-%d')
+    month_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    
+    if current_user.role == Role.ADMIN:
+        # 管理员：统计所有科室
+        cursor.execute("""
+            SELECT department, COUNT(*) as total,
+                   SUM(CASE WHEN admission_date = ? THEN 1 ELSE 0 END) as today_count,
+                   SUM(CASE WHEN admission_date >= ? THEN 1 ELSE 0 END) as month_count
+            FROM records 
+            GROUP BY department
+        """, (today, month_ago))
+    else:
+        # 医生：只统计自己科室
+        cursor.execute("""
+            SELECT department, COUNT(*) as total,
+                   SUM(CASE WHEN admission_date = ? THEN 1 ELSE 0 END) as today_count,
+                   SUM(CASE WHEN admission_date >= ? THEN 1 ELSE 0 END) as month_count
+            FROM records 
+            WHERE department = ?
+            GROUP BY department
+        """, (today, month_ago, current_user.department))
+    
+    results = cursor.fetchall()
+    conn.close()
+    
+    stats = []
+    for row in results:
+        stats.append({
+            "department": row[0],
+            "total": row[1],
+            "today": row[2] or 0,
+            "month": row[3] or 0
+        })
+    
+    return {
+        "stats": stats,
+        "user_role": current_user.role.value,
+        "user_department": current_user.department
+    }
+
+
+@router.get("/users/list")
+def get_users_list(current_user: User = Depends(get_current_user_required), db: Session = Depends(get_db)):
+    """获取所有医生列表（仅管理员）"""
+    if current_user.role != Role.ADMIN:
+        raise HTTPException(status_code=403, detail="无权限")
+    
+    users = db.query(User).filter(User.role == Role.DOCTOR).all()
+    
+    return {
+        "total": len(users),
+        "users": [
+            {
+                "id": u.id,
+                "username": u.username,
+                "name": u.name,
+                "department": u.department,
+                "role": u.role.value
+            }
+            for u in users
+        ]
+    }
+
+
+@router.delete("/admin/delete-user/{user_id}")
+def delete_user(
+    user_id: int,
+    current_user: User = Depends(get_current_user_required),
+    db: Session = Depends(get_db)
+):
+    """删除医生账号（仅管理员）"""
+    if current_user.role != Role.ADMIN:
+        raise HTTPException(status_code=403, detail="无权限")
+    
+    user = db.query(User).filter(User.id == user_id, User.role == Role.DOCTOR).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    
+    db.delete(user)
+    db.commit()
+    
+    return {"message": "删除成功"}
+
+
+@router.post("/admin/reset-password/{user_id}")
+def reset_password(
+    user_id: int,
+    password_data: dict,
+    current_user: User = Depends(get_current_user_required),
+    db: Session = Depends(get_db)
+):
+    """重置医生密码（仅管理员）"""
+    if current_user.role != Role.ADMIN:
+        raise HTTPException(status_code=403, detail="无权限")
+    
+    user = db.query(User).filter(User.id == user_id, User.role == Role.DOCTOR).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    
+    new_password = password_data.get("password")
+    if not new_password or len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="密码至少6位")
+    
+    user.password = hash_password(new_password)
+    db.commit()
+    
+    return {"message": "密码重置成功"}
+
+@router.get("/check-username/{username}")
+def check_username(username: str, db: Session = Depends(get_db)):
+    """检查用户名是否已存在（用于前端实时验证）"""
+    user = db.query(User).filter(User.username == username).first()
+    return {"exists": user is not None, "available": user is None}
+
+# 保留旧的（可选）
+@router.get("/department/stats")
+def get_department_stats_old(current_user: User = Depends(get_current_user_required), db: Session = Depends(get_db)):
+    """获取各科室病历统计（旧版本，只返回总数）"""
+    import sqlite3
+    import os
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    if current_user.role == Role.ADMIN:
+        cursor.execute("""
+            SELECT department, COUNT(*) as count 
+            FROM records 
+            GROUP BY department
+        """)
+    else:
+        cursor.execute("""
+            SELECT department, COUNT(*) as count 
+            FROM records 
+            WHERE department = ?
+            GROUP BY department
+        """, (current_user.department,))
+    
+    results = cursor.fetchall()
+    conn.close()
+    
+    return {
+        "stats": [{"department": row[0], "count": row[1]} for row in results],
+        "user_role": current_user.role.value,
+        "user_department": current_user.department
+    }
+
+# @router.get("/records/list")
+# def get_records_list(
+#     current_user: User = Depends(get_current_user_required),
+#     db: Session = Depends(get_db),
+#     limit: int = 100,
+#     offset: int = 0,
+#     department: str = None
+# ):
+#     """获取病历列表（支持分页和科室筛选）"""
+#     import sqlite3
+#     import os
+    
+#     BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+#     DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+#     conn = sqlite3.connect(DB_PATH)
+#     conn.row_factory = sqlite3.Row
+#     cursor = conn.cursor()
+    
+#     # 使用子查询来获取行号
+#     # 首先获取符合条件的记录总数和排序后的记录
+#     conditions = []
+#     params = []
+    
+#     if current_user.role != Role.ADMIN:
+#         conditions.append("department = ?")
+#         params.append(current_user.department)
+    
+#     if department and current_user.role == Role.ADMIN:
+#         conditions.append("department = ?")
+#         params.append(department)
+    
+#     # 构建 WHERE 子句
+#     where_clause = ""
+#     if conditions:
+#         where_clause = " WHERE " + " AND ".join(conditions)
+    
+#     # 获取总数
+#     count_query = f"SELECT COUNT(*) FROM records{where_clause}"
+#     cursor.execute(count_query, params)
+#     total = cursor.fetchone()[0]
+    
+#     # 获取带行号的记录（使用 ROW_NUMBER）
+#     query = f"""
+#         SELECT 
+#             (SELECT COUNT(*) FROM records r2 
+#              WHERE r2.admission_date > r1.admission_date 
+#                 OR (r2.admission_date = r1.admission_date AND r2.record_id > r1.record_id)
+#             ) as idx,
+#             record_id, name, gender, age, department, admission_date, diagnosis, doctor_id
+#         FROM records r1
+#         {where_clause}
+#         ORDER BY admission_date DESC, record_id DESC
+#         LIMIT ? OFFSET ?
+#     """
+#     params.extend([limit, offset])
+    
+#     cursor.execute(query, params)
+#     rows = cursor.fetchall()
+    
+#     records = []
+#     for row in rows:
+#         records.append({
+#             "index": row["idx"],  # 使用 ROW_NUMBER 生成的索引
+#             "record_id": row["record_id"],
+#             "name": row["name"],
+#             "gender": row["gender"],
+#             "age": row["age"],
+#             "department": row["department"],
+#             "admission_date": row["admission_date"],
+#             "diagnosis": row["diagnosis"],
+#             "doctor_id": row["doctor_id"]
+#         })
+    
+#     conn.close()
+    
+#     return {
+#         "records": records,
+#         "total": total,
+#         "limit": limit,
+#         "offset": offset
+#     }
+
+@router.get("/records/list")
+def get_records_list(
+    current_user: User = Depends(get_current_user_required),
+    limit: int = 100,
+    offset: int = 0,
+    department: str = None,
+    search: str = None
+):
+    """获取病历列表"""
+    import sqlite3
+    import os
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    conditions = []
+    params = []
+    
+    if current_user.role != Role.ADMIN:
+        conditions.append("department = ?")
+        params.append(current_user.department)
+    
+    if department and current_user.role == Role.ADMIN:
+        conditions.append("department = ?")
+        params.append(department)
+    
+    if search and search.strip():
+        conditions.append("(record_id LIKE ? OR name LIKE ?)")
+        search_pattern = f"%{search.strip()}%"
+        params.append(search_pattern)
+        params.append(search_pattern)
+    
+    where_clause = ""
+    if conditions:
+        where_clause = " WHERE " + " AND ".join(conditions)
+    
+    # 总数
+    cursor.execute(f"SELECT COUNT(*) FROM records{where_clause}", params)
+    total = cursor.fetchone()[0]
+    
+    # 【关键】用 id 作为真实索引
+    query = f"""
+        SELECT id, record_id, name, gender, age, department, 
+               admission_date, diagnosis, doctor_id, doctor_name
+        FROM records{where_clause}
+        ORDER BY admission_date DESC, record_id DESC
+        LIMIT ? OFFSET ?
+    """
+    cursor.execute(query, params + [limit, offset])
+    rows = cursor.fetchall()
+    
+    records = []
+    for row in rows:
+        records.append({
+            "index": row[0] - 1,  # id 从1开始，转为0-based
+            "record_id": row[1],
+            "name": row[2],
+            "gender": row[3],
+            "age": row[4],
+            "department": row[5],
+            "admission_date": row[6],
+            "diagnosis": row[7],
+            "doctor_id": row[8],
+            "doctor_name": row[9]
+        })
+    
+    conn.close()
+    
+    return {
+        "records": records,
+        "total": total,
+        "limit": limit,
+        "offset": offset
+    }
+
+# 添加病历请求模型
+class CreateRecordRequest(BaseModel):
+    name: str
+    gender: str  # 'M' 或 'F'
+    age: int
+    id_card: str
+    department: str
+    admission_date: str
+    diagnosis: str
+    treatments: list = []
+    prescriptions: list = []
+    lab_results: dict = {}
+    imaging_reports: str = ""
+    notes: str = ""
+
+# @router.post("/records/create")
+# def create_record(
+#     req: CreateRecordRequest,
+#     current_user: User = Depends(get_current_user_required),
+#     db: Session = Depends(get_db)
+# ):
+#     """创建新病历"""
+    
+#     BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+#     DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+#     # 生成病历号
+#     record_id = f"MR-{datetime.now().strftime('%Y%m%d')}-{random.randint(10000, 99999)}"
+    
+#     # 计算出院日期（默认入院后7天）
+#     adm_date = datetime.strptime(req.admission_date, "%Y-%m-%d")
+#     disc_date = adm_date + timedelta(days=random.randint(3, 10))
+    
+#     # 获取该科室的医生
+#     conn = sqlite3.connect(DB_PATH)
+#     cursor = conn.cursor()
+    
+#     # 从 users 表获取医生
+#     cursor.execute(
+#         "SELECT username, name FROM users WHERE role = 'DOCTOR' AND department = ?",
+#         (req.department,)
+#     )
+#     doctors = cursor.fetchall()
+    
+#     if doctors:
+#         doctor_id, doctor_name = random.choice(doctors)
+#     else:
+#         doctor_id = "doc001"
+#         doctor_name = "张明"
+    
+#     # 格式化数据
+#     treatments_json = json.dumps(req.treatments, ensure_ascii=False)
+#     prescriptions_json = json.dumps(req.prescriptions, ensure_ascii=False)
+#     lab_results_json = json.dumps(req.lab_results, ensure_ascii=False)
+    
+#     # 插入记录
+#     cursor.execute('''
+#         INSERT INTO records (
+#             record_id, id_card, name, gender, age,
+#             admission_date, discharge_date, diagnosis,
+#             treatments, prescriptions, lab_results,
+#             imaging_reports, doctor_id, doctor_name, department, notes
+#         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+#     ''', (
+#         record_id, req.id_card, req.name, req.gender, req.age,
+#         req.admission_date, disc_date.strftime("%Y-%m-%d"), req.diagnosis,
+#         treatments_json, prescriptions_json, lab_results_json,
+#         req.imaging_reports, doctor_id, doctor_name, req.department, req.notes
+#     ))
+    
+#     conn.commit()
+    
+#     # 获取新插入记录的 id
+#     cursor.execute("SELECT last_insert_rowid()")
+#     rowid = cursor.fetchone()[0]
+#     new_index = rowid - 1
+    
+#     conn.close()
+    
+#     # === 新增：同步到 PIR 增量池 ===
+#     if server:
+#         record_data = {
+#         "record_id": record_id,
+#         "id_card": req.id_card,
+#         "name": req.name,
+#         "gender": req.gender,
+#         "age": req.age,
+#         "department": req.department,
+#         "admission_date": req.admission_date,
+#         "diagnosis": req.diagnosis,
+#         "doctor_name": doctor_name,
+#         "notes": req.notes
+#     }
+
+#     record_bytes = json.dumps(record_data, ensure_ascii=False).encode("utf-8")
+#     server.add_record(record_bytes)
+#     return {
+#         "success": True,
+#         "message": "病历创建成功",
+#         "record_id": record_id,
+#         "index": new_index,
+#         "doctor": {
+#             "id": doctor_id,
+#             "name": doctor_name
+#         }
+#     }
+
+@router.post("/records/create")
+def create_record(
+    req: CreateRecordRequest,
+    current_user: User = Depends(get_current_user_required),
+    db: Session = Depends(get_db)
+):
+    """创建新病历 - 后台异步重建 PIR 数据"""
+    import sqlite3
+    import json
+    import os
+    import random
+    import threading
+    from datetime import datetime, timedelta
+
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    TABLE_PATH = os.path.join(BASE_DIR, 'storage', 'piano_tables.json') 
+
+    # 1. 生成病历号
+    record_id = f"MR-{datetime.now().strftime('%Y%m%d')}-{random.randint(10000, 99999)}"
+    adm_date = datetime.strptime(req.admission_date, "%Y-%m-%d")
+    disc_date = adm_date + timedelta(days=random.randint(3, 10))
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT username, name FROM users WHERE role = 'DOCTOR' AND department = ?",
+        (req.department,)
+    )
+    doctors = cursor.fetchall()
+    doctor_id, doctor_name = random.choice(doctors) if doctors else ("doc001", "张明")
+
+    treatments_json = json.dumps(req.treatments, ensure_ascii=False)
+    prescriptions_json = json.dumps(req.prescriptions, ensure_ascii=False)
+    lab_results_json = json.dumps(req.lab_results, ensure_ascii=False)
+
+    # 2. 插入记录
+    cursor.execute('''
+        INSERT INTO records (
+            record_id, id_card, name, gender, age,
+            admission_date, discharge_date, diagnosis,
+            treatments, prescriptions, lab_results,
+            imaging_reports, doctor_id, doctor_name, department, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        record_id, req.id_card, req.name, req.gender, req.age,
+        req.admission_date, disc_date.strftime("%Y-%m-%d"), req.diagnosis,
+        treatments_json, prescriptions_json, lab_results_json,
+        req.imaging_reports, doctor_id, doctor_name, req.department, req.notes
+    ))
+    conn.commit()
+    cursor.execute("SELECT last_insert_rowid()")
+    rowid = cursor.fetchone()[0]
+    conn.close()
+
+    # 3. 后台异步重建 PIR 数据
+    def rebuild_pir_data():
+        import numpy as np
+        from core.piano_preprocess import PianoPreprocess
+        from core.piano_core import PianoServer
+        
+        print(f"[后台] 开始重建 PIR 数据...")
+        try:
+            # 重建 db.npy
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM records ORDER BY id ASC")
+            rows = cursor.fetchall()
+            data_bytes = []
+            for row in rows:
+                record = {
+                    "id": row[0],
+                    "record_id": row[1],
+                    "id_card": row[2],
+                    "name": row[3],
+                    "gender": row[4],
+                    "age": row[5],
+                    "admission_date": row[6],
+                    "discharge_date": row[7],
+                    "diagnosis": row[8],
+                    "treatments": json.loads(row[9]),
+                    "prescriptions": json.loads(row[10]),
+                    "lab_results": json.loads(row[11]),
+                    "imaging_reports": row[12],
+                    "doctor_id": row[13],
+                    "doctor_name": row[14],
+                    "department": row[15],
+                    "notes": row[16]
+                }
+                raw = json.dumps(record, ensure_ascii=False).encode('utf-8')
+                if len(raw) < 8192:
+                    raw += b'\x00' * (8192 - len(raw))
+                else:
+                    raw = raw[:8192]
+                data_bytes.append(np.frombuffer(raw, dtype=np.uint8))
+            db_matrix = np.array(data_bytes)
+            np.save(NPY_PATH, db_matrix)
+            conn.close()
+            
+            # 重建预处理表
+            pre = PianoPreprocess(NPY_PATH, NPY_PATH, None)
+            pre.load_db()
+            tables = pre.save_tables(TABLE_PATH)
+            
+            # 更新全局变量
+            global server, piano_tables, DB_SIZE
+            server = PianoServer([row.tobytes() for row in db_matrix])
+            piano_tables = tables
+            DB_SIZE = len(db_matrix)
+            
+            print(f"[后台] ✅ PIR 数据重建完成，总记录数: {DB_SIZE}")
+        except Exception as e:
+            print(f"[后台] ❌ PIR 重建失败: {e}")
+    
+    # 启动后台线程
+    threading.Thread(target=rebuild_pir_data).start()
+
+    return {
+        "success": True,
+        "message": "病历创建成功，PIR 数据正在后台更新",
+        "record_id": record_id,
+        "index": rowid - 1,
+        "doctor": {
+            "id": doctor_id,
+            "name": doctor_name
+        }
+    }
+
+# @router.get("/doctors/list")
+# def get_doctors_list(
+#     current_user: User = Depends(get_current_user_required),
+#     db: Session = Depends(get_db),
+#     department: str = None
+# ):
+#     """获取医生列表"""
+#     import sqlite3
+#     import os
+    
+#     BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+#     DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+#     conn = sqlite3.connect(DB_PATH)
+#     cursor = conn.cursor()
+    
+#     if department:
+#         cursor.execute(
+#             "SELECT username, name, department FROM users WHERE role = 'doctor' AND department = ?",
+#             (department,)
+#         )
+#     else:
+#         cursor.execute("SELECT username, name, department FROM users WHERE role = 'doctor'")
+    
+#     doctors = [{"id": row[0], "name": row[1], "department": row[2]} for row in cursor.fetchall()]
+#     conn.close()
+    
+#     return {"doctors": doctors}
+
+@router.get("/doctors/list")
+def get_doctors_list(
+    current_user: User = Depends(get_current_user_required),
+    db: Session = Depends(get_db),
+    department: str = None
+):
+    """获取医生列表"""
+    import sqlite3
+    import os
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    print(f"【接口收到的科室】: '{department}'")
+
+    if department:
+        # ✅ 只改这一行：把 = 换成 LIKE，模糊匹配，立刻查到数据！
+        cursor.execute(
+            "SELECT username, name, department FROM users WHERE role = 'doctor' AND department LIKE ?",
+            (f"%{department}%",)  # 加%包裹，模糊匹配，绕过编码/隐藏字符问题
+        )
+    else:
+        cursor.execute("SELECT username, name, department FROM users WHERE role = 'doctor'")
+    
+    doctors = [{"id": row[0], "name": row[1], "department": row[2]} for row in cursor.fetchall()]
+    print(f"【查询到的医生数量】: {len(doctors)}")
+    conn.close()
+    
+    return {"doctors": doctors}
+
+@router.get("/stats/total")
+def get_total_stats(current_user: User = Depends(get_current_user_required)):
+    """获取总记录数（基础+增量）"""
+    if server:
+        return {"total_records": server.get_current_total_count()}
+    return {"total_records": 0}
+
+@router.get("/piano/tables")
+def get_piano_tables(current_user: User = Depends(get_current_user_required)):
+    import json
+    import os
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    PIANO_TABLES_PATH = os.path.join(BASE_DIR, 'storage', 'piano_tables.json')
+    if os.path.exists(PIANO_TABLES_PATH):
+        with open(PIANO_TABLES_PATH, 'r') as f:
+            return json.load(f)
+    return {"primary_table": [], "backup_table": {}, "replacement_entries": {}, "params": {}}
+
+@router.get("/stats/department/month")
+def get_department_stats_month(
+    current_user: User = Depends(get_current_user_required),
+    department: str = None
+):
+    """获取上月科室统计"""
+    import sqlite3
+    import os
+    from datetime import datetime, timedelta
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # 计算上月时间范围
+    today = datetime.now()
+    first_day_this_month = today.replace(day=1)
+    last_day_last_month = first_day_this_month - timedelta(days=1)
+    first_day_last_month = last_day_last_month.replace(day=1)
+    
+    start = first_day_last_month.strftime("%Y-%m-%d")
+    end = last_day_last_month.strftime("%Y-%m-%d")
+    
+    if current_user.role != Role.ADMIN and department:
+        dept_filter = department
+    elif current_user.role != Role.ADMIN:
+        dept_filter = current_user.department
+    else:
+        dept_filter = department
+    
+    if dept_filter:
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total,
+                SUM(CASE WHEN admission_date >= ? AND admission_date <= ? THEN 1 ELSE 0 END) as month_count,
+                SUM(CASE WHEN admission_date = ? THEN 1 ELSE 0 END) as today_count
+            FROM records 
+            WHERE department = ?
+        """, (start, end, today.strftime("%Y-%m-%d"), dept_filter))
+    else:
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total,
+                SUM(CASE WHEN admission_date >= ? AND admission_date <= ? THEN 1 ELSE 0 END) as month_count,
+                SUM(CASE WHEN admission_date = ? THEN 1 ELSE 0 END) as today_count
+            FROM records
+        """, (start, end, today.strftime("%Y-%m-%d")))
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    return {
+        "stats": [{
+            "total": row[0] or 0,
+            "month": row[1] or 0,
+            "today": row[2] or 0
+        }]
+    }
+
+
+@router.get("/stats/department/yesterday")
+def get_department_stats_yesterday(
+    current_user: User = Depends(get_current_user_required),
+    department: str = None
+):
+    """获取昨日科室统计"""
+    import sqlite3
+    import os
+    from datetime import datetime, timedelta
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    
+    if current_user.role != Role.ADMIN and department:
+        dept_filter = department
+    elif current_user.role != Role.ADMIN:
+        dept_filter = current_user.department
+    else:
+        dept_filter = department
+    
+    if dept_filter:
+        cursor.execute("""
+            SELECT COUNT(*) FROM records 
+            WHERE department = ? AND admission_date = ?
+        """, (dept_filter, yesterday))
+    else:
+        cursor.execute("""
+            SELECT COUNT(*) FROM records 
+            WHERE admission_date = ?
+        """, (yesterday,))
+    
+    count = cursor.fetchone()[0] or 0
+    conn.close()
+    
+    return {
+        "stats": [{"today": count}]
+    }
+
+@router.get("/stats/trend")
+def get_trend_stats(
+    current_user: User = Depends(get_current_user_required),
+    department: str = None,
+    start_date: str = None,
+    end_date: str = None,
+    unit: str = "month"
+):
+    """获取病历趋势统计"""
+    import sqlite3
+    import os
+    from datetime import datetime, timedelta
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # 权限控制
+    if current_user.role != Role.ADMIN:
+        dept_filter = current_user.department
+    else:
+        dept_filter = department
+    
+    # 解析日期范围
+    start = datetime.strptime(start_date, "%Y-%m-%d") if start_date else datetime.now() - timedelta(days=180)
+    end = datetime.strptime(end_date, "%Y-%m-%d") if end_date else datetime.now()
+    
+    # 根据单位生成分组格式
+    if unit == "day":
+        format_str = "%Y-%m-%d"
+        step = timedelta(days=1)
+    elif unit == "week":
+        format_str = "%Y-%W"  # 年-周数
+        step = timedelta(weeks=1)
+    elif unit == "month":
+        format_str = "%Y-%m"
+        step = timedelta(days=30)
+    else:  # year
+        format_str = "%Y"
+        step = timedelta(days=365)
+    
+    # 构建查询
+    if dept_filter:
+        cursor.execute("""
+            SELECT admission_date, COUNT(*) 
+            FROM records 
+            WHERE department = ? AND admission_date BETWEEN ? AND ?
+            GROUP BY admission_date
+            ORDER BY admission_date
+        """, (dept_filter, start_date, end_date))
+    else:
+        cursor.execute("""
+            SELECT admission_date, COUNT(*) 
+            FROM records 
+            WHERE admission_date BETWEEN ? AND ?
+            GROUP BY admission_date
+            ORDER BY admission_date
+        """, (start_date, end_date))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    # 聚合数据
+    from collections import defaultdict
+    aggregated = defaultdict(int)
+    
+    for date_str, count in rows:
+        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+        if unit == "week":
+            key = date_obj.strftime("%Y-W%W")
+        elif unit == "month":
+            key = date_obj.strftime("%Y-%m")
+        elif unit == "year":
+            key = date_obj.strftime("%Y")
+        else:
+            key = date_str
+        aggregated[key] += count
+    
+    # 生成完整的时间序列
+    labels = []
+    values = []
+    current = start
+    while current <= end:
+        if unit == "day":
+            key = current.strftime("%Y-%m-%d")
+        elif unit == "week":
+            key = current.strftime("%Y-W%W")
+        elif unit == "month":
+            key = current.strftime("%Y-%m")
+        else:
+            key = current.strftime("%Y")
+        labels.append(key)
+        values.append(aggregated.get(key, 0))
+        current += step
+    
+    return {
+        "labels": labels,
+        "values": values,
+        "unit": unit,
+        "start_date": start_date,
+        "end_date": end_date
+    }
+
+    @router.get("/stats/overall/lastmonth")
+    def get_overall_stats_lastmonth(current_user: User = Depends(get_current_user_required)):
+        """获取上月总体统计（用于同比）"""
+        if current_user.role != Role.ADMIN:
+            raise HTTPException(status_code=403, detail="无权限")
+    
+    import sqlite3
+    import os
+    from datetime import datetime, timedelta
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    today = datetime.now()
+    first_day_this_month = today.replace(day=1)
+    last_day_last_month = first_day_this_month - timedelta(days=1)
+    first_day_last_month = last_day_last_month.replace(day=1)
+    
+    start = first_day_last_month.strftime("%Y-%m-%d")
+    end = last_day_last_month.strftime("%Y-%m-%d")
+    
+    # 上月新增病历数
+    cursor.execute("SELECT COUNT(*) FROM records WHERE admission_date BETWEEN ? AND ?", (start, end))
+    month_new = cursor.fetchone()[0]
+    
+    # 上月医生总数
+    cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'doctor'")
+    doctor_count = cursor.fetchone()[0]
+    
+    # 上月总病历数
+    cursor.execute("SELECT COUNT(*) FROM records")
+    total_records = cursor.fetchone()[0]
+    
+    conn.close()
+    
+    return {
+        "total_records": total_records,
+        "doctor_count": doctor_count,
+        "month_new": month_new,
+        "today_new": 0
+    }
+
+
+@router.get("/stats/overall/yesterday")
+def get_overall_stats_yesterday(current_user: User = Depends(get_current_user_required)):
+    """获取昨日总体统计（用于今日对比）"""
+    if current_user.role != Role.ADMIN:
+        raise HTTPException(status_code=403, detail="无权限")
+    
+    import sqlite3
+    import os
+    from datetime import datetime, timedelta
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    
+    cursor.execute("SELECT COUNT(*) FROM records WHERE admission_date = ?", (yesterday,))
+    today_new = cursor.fetchone()[0]
+    
+    conn.close()
+    
+    return {"today_new": today_new}
+
+@router.get("/stats/overall/lastmonth")
+def get_overall_stats_lastmonth(current_user: User = Depends(get_current_user_required)):
+    """获取上月总体统计（用于同比）"""
+    if current_user.role != Role.ADMIN:
+        raise HTTPException(status_code=403, detail="无权限")
+    
+    import sqlite3
+    import os
+    from datetime import datetime, timedelta
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    today = datetime.now()
+    first_day_this_month = today.replace(day=1)
+    last_day_last_month = first_day_this_month - timedelta(days=1)
+    first_day_last_month = last_day_last_month.replace(day=1)
+    
+    start = first_day_last_month.strftime("%Y-%m-%d")
+    end = last_day_last_month.strftime("%Y-%m-%d")
+    
+    # 上月总病历数
+    cursor.execute("SELECT COUNT(*) FROM records WHERE admission_date <= ?", (end,))
+    total_records = cursor.fetchone()[0]
+    
+    # 上月医生总数
+    cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'doctor'")
+    doctor_count = cursor.fetchone()[0]
+    
+    # 上月新增病历数
+    cursor.execute("SELECT COUNT(*) FROM records WHERE admission_date BETWEEN ? AND ?", (start, end))
+    month_new = cursor.fetchone()[0]
+    
+    conn.close()
+    
+    return {
+        "total_records": total_records,
+        "doctor_count": doctor_count,
+        "month_new": month_new,
+        "today_new": 0
+    }
+
+
+@router.get("/stats/overall/yesterday")
+def get_overall_stats_yesterday(current_user: User = Depends(get_current_user_required)):
+    """获取昨日总体统计（用于今日对比）"""
+    if current_user.role != Role.ADMIN:
+        raise HTTPException(status_code=403, detail="无权限")
+    
+    import sqlite3
+    import os
+    from datetime import datetime, timedelta
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    
+    cursor.execute("SELECT COUNT(*) FROM records WHERE admission_date = ?", (yesterday,))
+    today_new = cursor.fetchone()[0]
+    
+    conn.close()
+    
+    return {"today_new": today_new}
+
+
+@router.get("/stats/doctor/distribution")
+def get_doctor_distribution(current_user: User = Depends(get_current_user_required)):
+    """获取各科室医生数量分布"""
+    if current_user.role != Role.ADMIN:
+        raise HTTPException(status_code=403, detail="无权限")
+    
+    import sqlite3
+    import os
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT department, COUNT(*) as count 
+        FROM users 
+        WHERE role = 'DOCTOR' 
+        GROUP BY department
+        ORDER BY count DESC
+    """)
+    
+    results = cursor.fetchall()
+    conn.close()
+    
+    return [{"department": row[0], "count": row[1]} for row in results]
+
+
+@router.get("/stats/doctor/workload")
+def get_doctor_workload(
+    current_user: User = Depends(get_current_user_required),
+    start_date: str = None,
+    end_date: str = None
+):
+    """获取医生接诊量排行（可筛选时间段）"""
+    if current_user.role != Role.ADMIN:
+        raise HTTPException(status_code=403, detail="无权限")
+    
+    import sqlite3
+    import os
+    from datetime import datetime, timedelta
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # 默认最近30天
+    if not start_date or not end_date:
+        end = datetime.now()
+        start = end - timedelta(days=30)
+        start_date = start.strftime("%Y-%m-%d")
+        end_date = end.strftime("%Y-%m-%d")
+    
+    cursor.execute("""
+        SELECT doctor_name, COUNT(*) as count 
+        FROM records 
+        WHERE admission_date BETWEEN ? AND ?
+        GROUP BY doctor_name
+        ORDER BY count DESC
+        LIMIT 10
+    """, (start_date, end_date))
+    
+    results = cursor.fetchall()
+    conn.close()
+    
+    return [{"name": row[0], "count": row[1]} for row in results]
+
+
+@router.get("/stats/department/yoy")
+def get_department_yoy(
+    current_user: User = Depends(get_current_user_required),
+    year: int = None
+):
+    """获取各科室病历同比变化（较去年同期）"""
+    if current_user.role != Role.ADMIN:
+        raise HTTPException(status_code=403, detail="无权限")
+    
+    import sqlite3
+    import os
+    from datetime import datetime
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    if not year:
+        year = datetime.now().year
+    
+    current_start = f"{year}-01-01"
+    current_end = f"{year}-12-31"
+    last_start = f"{year-1}-01-01"
+    last_end = f"{year-1}-12-31"
+    
+    # 获取今年各科室数据
+    cursor.execute("""
+        SELECT department, COUNT(*) as count 
+        FROM records 
+        WHERE admission_date BETWEEN ? AND ?
+        GROUP BY department
+    """, (current_start, current_end))
+    current_data = {row[0]: row[1] for row in cursor.fetchall()}
+    
+    # 获取去年各科室数据
+    cursor.execute("""
+        SELECT department, COUNT(*) as count 
+        FROM records 
+        WHERE admission_date BETWEEN ? AND ?
+        GROUP BY department
+    """, (last_start, last_end))
+    last_data = {row[0]: row[1] for row in cursor.fetchall()}
+    
+    # 获取所有科室列表
+    cursor.execute("SELECT DISTINCT department FROM records")
+    departments = [row[0] for row in cursor.fetchall()]
+    
+    conn.close()
+    
+    current_list = [{"department": dept, "count": current_data.get(dept, 0)} for dept in departments]
+    last_year_counts = [last_data.get(dept, 0) for dept in departments]
+    growth = {}
+    for dept in departments:
+        last = last_data.get(dept, 0)
+        curr = current_data.get(dept, 0)
+        if last == 0:
+            growth[dept] = 100 if curr > 0 else 0
+        else:
+            growth[dept] = round((curr - last) / last * 100, 1)
+    
+    return {
+        "departments": departments,
+        "current": current_list,
+        "last_year_counts": last_year_counts,
+        "growth": growth
+    }
+
+@router.get("/stats/doctor/trend")
+def get_doctor_trend(
+    current_user: User = Depends(get_current_user_required),
+    doctor_name: str = None,
+    months: int = 12
+):
+    """获取单个医生的接诊趋势"""
+    import sqlite3
+    import os
+    from datetime import datetime, timedelta
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=months*30)
+    
+    cursor.execute("""
+        SELECT strftime('%Y-%m', admission_date) as month, COUNT(*) as count
+        FROM records
+        WHERE doctor_name = ? AND admission_date BETWEEN ? AND ?
+        GROUP BY month
+        ORDER BY month
+    """, (doctor_name, start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")))
+    
+    results = cursor.fetchall()
+    conn.close()
+    
+    months_list = []
+    counts_list = []
+    for row in results:
+        months_list.append(row[0])
+        counts_list.append(row[1])
+    
+    return {
+        "months": months_list,
+        "counts": counts_list
+    }
+
+
+@router.post("/ai/chat")
+def ai_chat(
+    req: AIChatRequest,
+    current_user: User = Depends(get_current_user_required)
+):
+    """
+    AI 对话接口
+    支持 DeepSeek-R1 和豆包模型
+    """
+    ai = AIAssistant()
+    
+    # 系统提示词
+    system_prompt = {
+        "role": "system",
+        "content": """你是一个专业的医疗问诊助手，名叫"仁爱医助"。你的职责是：
+1. 根据患者描述的症状，给出初步的诊断建议
+2. 建议必要的检查项目
+3. 给出治疗和用药建议
+4. 提醒注意事项
+
+注意：
+- 回答要专业、准确、简洁
+- 不确定的情况建议进一步检查
+- 所有建议仅供参考，最终诊断需由医生决定
+- 回答请使用中文
+"""
+    }
+    
+    # 构建完整消息
+    full_messages = [system_prompt] + req.messages
+    
+    # 调用 AI
+    if req.model == "doubao":
+        result = ai.call_doubao(full_messages)
+    else:
+        result = ai.call_deepseek(full_messages)
+    
+    if result:
+        return {
+            "success": True,
+            "content": result,
+            "model": req.model
+        }
+    else:
+        raise HTTPException(status_code=500, detail="AI服务调用失败，请稍后重试")
+ 
