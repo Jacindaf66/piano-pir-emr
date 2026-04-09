@@ -680,169 +680,7 @@ function searchRecords() {
   loadRecords()
 }
 
-
-// 查看病历详情
-// async function viewRecord(row) {
-//   console.log('=== 开始查看病历详情 ===', row)
-//   showDetail.value = true
-//   detailLoading.value = true
-//   currentDetail.value = null
-
-//   try {
-//     const token = localStorage.getItem('token')
-    
-//     // 1. 获取元数据
-//     const metaRes = await axios.get('/meta', {
-//       headers: { 'Authorization': `Bearer ${token}` }
-//     })
-//     const dbSize = metaRes.data.db_size
-//     const blockSize = metaRes.data.block_size
-//     console.log('元数据:', { dbSize, blockSize })
-
-//     // ========== 新增：获取总记录数（基础+增量）==========
-//     const totalRes = await axios.get('/stats/total', {
-//       headers: { 'Authorization': `Bearer ${token}` }
-//     })
-//     const totalSize = totalRes.data.total_records
-//     console.log('总记录数:', totalSize, '(基础:', dbSize, ', 增量:', totalSize - dbSize, ')')
-
-//     // 2. 加载预处理表
-//     let pianoTables = null
-//     try {
-//       const tablesRes = await axios.get('/piano/tables', {
-//         headers: { 'Authorization': `Bearer ${token}` }
-//       })
-//       pianoTables = tablesRes.data
-//       console.log('加载预处理表成功，主表大小:', pianoTables.primary_table?.length)
-//     } catch (err) {
-//       console.warn('加载预处理表失败:', err)
-//     }
-
-//     // 3. 初始化 PianoClient
-//     if (!pianoClient) {
-//       const { PianoClient } = await import('../utils/piano.js')
-//       pianoClient = new PianoClient(dbSize, blockSize, pianoTables)
-//       console.log('PianoClient 初始化完成')
-//     }else {
-//       // ========== 新增：更新 dbSize ==========
-//       pianoClient.updateParams(totalSize)
-//     }
-
-//     // 4. 生成查询
-//     const targetIndex = row.index
-//     console.log('目标索引:', targetIndex)
-//     const query = pianoClient.generateQuery(targetIndex)
-//     console.log('查询大小:', query.byteLength)
-
-//     // 5. 发送 PIR 查询
-//     const response = await fetch(`${BASE_URL}/query`, {
-//       method: 'POST',
-//       headers: {
-//         'Content-Type': 'application/octet-stream',
-//         'Authorization': `Bearer ${token}`
-//       },
-//       body: query
-//     })
-    
-//     if (!response.ok) {
-//       throw new Error(`查询失败: ${response.status}`)
-//     }
-    
-//     const encryptedData = await response.arrayBuffer()
-//     console.log('收到加密数据，大小:', encryptedData.byteLength)
-
-//     // 6. 解密
-//     const plainData = pianoClient.decryptResponse(encryptedData)
-
-//     // ==========================================
-//     // 👉 核心修复：在字节级别截断，坚决不让 TextDecoder 碰到多余的 \x00
-//     // ==========================================
-//     const bytes = new Uint8Array(plainData)
-    
-//     // 1. 寻找第一个 \x00 (Null) 的位置
-//     let endIdx = bytes.indexOf(0)
-//     if (endIdx === -1) {
-//       endIdx = bytes.length // 如果没找到0，说明刚好占满
-//     }
-    
-//     // 2. 只截取有用的真实数据部分 (丢弃后面的所有 padding)
-//     const validBytes = bytes.subarray(0, endIdx)
-    
-//     // 3. 解码真正的有效内容
-//     let decodedText = new TextDecoder('utf-8').decode(validBytes).trim()
-
-//     // 4. 去掉 UTF-8 BOM（如果有的话）
-//     if (decodedText.charCodeAt(0) === 0xFEFF) {
-//       decodedText = decodedText.slice(1)
-//     }
-
-//     // 5. 抗截断保护：如果 JSON 最后几位有乱码，我们退回到最后一个有效的 }
-//     const lastBrace = decodedText.lastIndexOf('}')
-//     if (lastBrace !== -1 && lastBrace < decodedText.length - 1) {
-//       decodedText = decodedText.substring(0, lastBrace + 1)
-//     }
-
-//     console.log('解密后纯净文本预览:', decodedText.slice(0, 200))
-
-//     // 7. 解析 JSON
-//     let decoded
-//     try {
-//       decoded = JSON.parse(decodedText)
-//     } catch (e) {
-//       console.error('❌ JSON解析失败，原始内容：', decodedText.slice(0, 200))
-//       throw e // 抛出异常进入外层的 catch 块
-//     }
-
-//     // 8. 处理各字段
-//     const treatments = Array.isArray(decoded.treatments)
-//       ? decoded.treatments
-//       : (decoded.treatments ? [decoded.treatments] :[])
-    
-//     const prescriptions = Array.isArray(decoded.prescriptions)
-//       ? decoded.prescriptions
-//       : (decoded.prescriptions ? [{ drug: decoded.prescriptions }] :[])
-
-//     // 9. 组装详情数据
-//     currentDetail.value = {
-//       record_id: decoded.record_id || row.record_id,
-//       name: decoded.name || row.name,
-//       gender: decoded.gender || row.gender,
-//       age: decoded.age || row.age,
-//       id_card: decoded.id_card || '未知',
-//       admission_date: decoded.admission_date || row.admission_date,
-//       discharge_date: decoded.discharge_date || '未出院',
-//       department: decoded.department || row.department,
-//       doctor_id: decoded.doctor_id || row.doctor_id,
-//       doctor_name: decoded.doctor_name || row.doctor_name,
-//       diagnosis: decoded.diagnosis || row.diagnosis || '暂无诊断',
-//       treatments,
-//       prescriptions,
-//       lab_results: decoded.lab_results || '暂无检验结果',
-//       imaging_reports: decoded.imaging_reports || '暂无影像报告',
-//       notes: decoded.notes || '暂无备注'
-//     }
-
-//     console.log('✅ 病历详情加载成功')
-
-//   } catch (err) {
-//     console.error('❌ 获取病历详情失败:', err)
-//     ElMessage.error('获取病历详情失败：' + err.message)
-    
-//     // 使用本地数据作为备用
-//     currentDetail.value = {
-//       ...row,
-//       treatments: [],
-//       prescriptions:[],
-//       lab_results: '暂无检验结果',
-//       imaging_reports: '暂无影像报告',
-//       notes: '暂无备注'
-//     }
-//   } finally {
-//     detailLoading.value = false
-//   }
-// }
-// DoctorDashboard.vue 中的查看病历函数
-
+//查看病历详情
 async function viewRecord(row) {
   console.log('=== [PIR模式] 开始查询病历详情 ===', row)
   showDetail.value = true
@@ -984,15 +822,6 @@ function removePrescription(index) {
   newRecord.prescriptions.splice(index, 1)
 }
 
-//async function onDepartmentChange(dept) {
-//  try {
-//    const res = await axios.get('/doctors/list', { params: { department: dept } })
-//    availableDoctors.value = res.data.doctors || []
-//    if (availableDoctors.value.length) newRecord.doctor_id = availableDoctors.value[0].id
-//  } catch (err) {
-//    console.error('加载医生失败', err)
-//  }
-//}
 
 async function onDepartmentChange(dept) {
   if (!dept) {
@@ -1037,6 +866,8 @@ async function onDepartmentChange(dept) {
     ]
   }
 }
+
+//创建病历
 async function createRecord() {
   if (!recordFormRef.value) return
   await recordFormRef.value.validate(async valid => {
@@ -1050,15 +881,24 @@ async function createRecord() {
       })
       ElMessage.success('创建成功：' + res.data.record_id)
       showCreateRecord.value = false
-      // 重置
+      
+      // 重置表单
       Object.assign(newRecord, {
         name: '', gender: 'M', age: 30, id_card: '', department: '',
         doctor_id: '', admission_date: new Date(), diagnosis: '',
         treatments: [], prescriptions: [], notes: ''
       })
-       newRecord.lab_results = {}
-       newRecord.imaging_reports = ''
-      loadRecords()
+      newRecord.lab_results = {}
+      newRecord.imaging_reports = ''
+      
+      // 重新加载病历列表
+      await loadRecords()
+      
+      // ⭐ 延迟1秒后重新加载整个页面数据
+      setTimeout(() => {
+        location.reload()
+      }, 1000)
+      
     } catch (err) {
       ElMessage.error(err.response?.data?.detail || '创建失败')
     } finally {

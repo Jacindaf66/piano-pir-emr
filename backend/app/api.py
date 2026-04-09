@@ -808,47 +808,44 @@ class CreateRecordRequest(BaseModel):
     imaging_reports: str = ""
     notes: str = ""
 
+
 # @router.post("/records/create")
 # def create_record(
 #     req: CreateRecordRequest,
 #     current_user: User = Depends(get_current_user_required),
 #     db: Session = Depends(get_db)
 # ):
-#     """创建新病历"""
-    
+#     """创建新病历 - 后台异步重建 PIR 数据"""
+#     import sqlite3
+#     import json
+#     import os
+#     import random
+#     import threading
+#     from datetime import datetime, timedelta
+
 #     BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 #     DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
-    
-#     # 生成病历号
+#     TABLE_PATH = os.path.join(BASE_DIR, 'storage', 'piano_tables.json') 
+
+#     # 1. 生成病历号
 #     record_id = f"MR-{datetime.now().strftime('%Y%m%d')}-{random.randint(10000, 99999)}"
-    
-#     # 计算出院日期（默认入院后7天）
 #     adm_date = datetime.strptime(req.admission_date, "%Y-%m-%d")
 #     disc_date = adm_date + timedelta(days=random.randint(3, 10))
-    
-#     # 获取该科室的医生
+
 #     conn = sqlite3.connect(DB_PATH)
 #     cursor = conn.cursor()
-    
-#     # 从 users 表获取医生
 #     cursor.execute(
 #         "SELECT username, name FROM users WHERE role = 'DOCTOR' AND department = ?",
 #         (req.department,)
 #     )
 #     doctors = cursor.fetchall()
-    
-#     if doctors:
-#         doctor_id, doctor_name = random.choice(doctors)
-#     else:
-#         doctor_id = "doc001"
-#         doctor_name = "张明"
-    
-#     # 格式化数据
+#     doctor_id, doctor_name = random.choice(doctors) if doctors else ("doc001", "张明")
+
 #     treatments_json = json.dumps(req.treatments, ensure_ascii=False)
 #     prescriptions_json = json.dumps(req.prescriptions, ensure_ascii=False)
 #     lab_results_json = json.dumps(req.lab_results, ensure_ascii=False)
-    
-#     # 插入记录
+
+#     # 2. 插入记录
 #     cursor.execute('''
 #         INSERT INTO records (
 #             record_id, id_card, name, gender, age,
@@ -862,38 +859,78 @@ class CreateRecordRequest(BaseModel):
 #         treatments_json, prescriptions_json, lab_results_json,
 #         req.imaging_reports, doctor_id, doctor_name, req.department, req.notes
 #     ))
-    
 #     conn.commit()
-    
-#     # 获取新插入记录的 id
 #     cursor.execute("SELECT last_insert_rowid()")
 #     rowid = cursor.fetchone()[0]
-#     new_index = rowid - 1
-    
 #     conn.close()
-    
-#     # === 新增：同步到 PIR 增量池 ===
-#     if server:
-#         record_data = {
-#         "record_id": record_id,
-#         "id_card": req.id_card,
-#         "name": req.name,
-#         "gender": req.gender,
-#         "age": req.age,
-#         "department": req.department,
-#         "admission_date": req.admission_date,
-#         "diagnosis": req.diagnosis,
-#         "doctor_name": doctor_name,
-#         "notes": req.notes
-#     }
 
-#     record_bytes = json.dumps(record_data, ensure_ascii=False).encode("utf-8")
-#     server.add_record(record_bytes)
+#     # 3. 后台异步重建 PIR 数据
+#     def rebuild_pir_data():
+#         import numpy as np
+#         from core.piano_preprocess import PianoPreprocess
+#         from core.piano_core import PianoServer
+        
+#         print(f"[后台] 开始重建 PIR 数据...")
+#         try:
+#             # 重建 db.npy
+#             conn = sqlite3.connect(DB_PATH)
+#             cursor = conn.cursor()
+#             cursor.execute("SELECT * FROM records ORDER BY id ASC")
+#             rows = cursor.fetchall()
+#             data_bytes = []
+#             for row in rows:
+#                 record = {
+#                     "id": row[0],
+#                     "record_id": row[1],
+#                     "id_card": row[2],
+#                     "name": row[3],
+#                     "gender": row[4],
+#                     "age": row[5],
+#                     "admission_date": row[6],
+#                     "discharge_date": row[7],
+#                     "diagnosis": row[8],
+#                     "treatments": json.loads(row[9]),
+#                     "prescriptions": json.loads(row[10]),
+#                     "lab_results": json.loads(row[11]),
+#                     "imaging_reports": row[12],
+#                     "doctor_id": row[13],
+#                     "doctor_name": row[14],
+#                     "department": row[15],
+#                     "notes": row[16]
+#                 }
+#                 raw = json.dumps(record, ensure_ascii=False).encode('utf-8')
+#                 if len(raw) < 8192:
+#                     raw += b'\x00' * (8192 - len(raw))
+#                 else:
+#                     raw = raw[:8192]
+#                 data_bytes.append(np.frombuffer(raw, dtype=np.uint8))
+#             db_matrix = np.array(data_bytes)
+#             np.save(NPY_PATH, db_matrix)
+#             conn.close()
+            
+#             # 重建预处理表
+#             pre = PianoPreprocess(NPY_PATH, NPY_PATH, None)
+#             pre.load_db()
+#             tables = pre.save_tables(TABLE_PATH)
+            
+#             # 更新全局变量
+#             global server, piano_tables, DB_SIZE
+#             server = PianoServer([row.tobytes() for row in db_matrix])
+#             piano_tables = tables
+#             DB_SIZE = len(db_matrix)
+            
+#             print(f"[后台] ✅ PIR 数据重建完成，总记录数: {DB_SIZE}")
+#         except Exception as e:
+#             print(f"[后台] ❌ PIR 重建失败: {e}")
+    
+#     # 启动后台线程
+#     threading.Thread(target=rebuild_pir_data).start()
+
 #     return {
 #         "success": True,
-#         "message": "病历创建成功",
+#         "message": "病历创建成功，PIR 数据正在后台更新",
 #         "record_id": record_id,
-#         "index": new_index,
+#         "index": rowid - 1,
 #         "doctor": {
 #             "id": doctor_id,
 #             "name": doctor_name
@@ -906,19 +943,23 @@ def create_record(
     current_user: User = Depends(get_current_user_required),
     db: Session = Depends(get_db)
 ):
-    """创建新病历 - 后台异步重建 PIR 数据"""
+    """创建新病历 - 同步重建 PIR 数据"""
     import sqlite3
     import json
     import os
     import random
-    import threading
+    import subprocess
+    import sys
     from datetime import datetime, timedelta
+    from core.piano_preprocess import PianoPreprocess
+    from core.piano_core import PianoServer
 
     BASE_DIR = os.path.dirname(os.path.dirname(__file__))
     DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
-    TABLE_PATH = os.path.join(BASE_DIR, 'storage', 'piano_tables.json') 
+    NPY_PATH = os.path.join(BASE_DIR, 'storage', 'db.npy')
+    TABLE_PATH = os.path.join(BASE_DIR, 'storage', 'piano_tables.json')
 
-    # 1. 生成病历号
+    # 1. 插入新病历
     record_id = f"MR-{datetime.now().strftime('%Y%m%d')}-{random.randint(10000, 99999)}"
     adm_date = datetime.strptime(req.admission_date, "%Y-%m-%d")
     disc_date = adm_date + timedelta(days=random.randint(3, 10))
@@ -936,7 +977,6 @@ def create_record(
     prescriptions_json = json.dumps(req.prescriptions, ensure_ascii=False)
     lab_results_json = json.dumps(req.lab_results, ensure_ascii=False)
 
-    # 2. 插入记录
     cursor.execute('''
         INSERT INTO records (
             record_id, id_card, name, gender, age,
@@ -955,71 +995,61 @@ def create_record(
     rowid = cursor.fetchone()[0]
     conn.close()
 
-    # 3. 后台异步重建 PIR 数据
-    def rebuild_pir_data():
-        import numpy as np
-        from core.piano_preprocess import PianoPreprocess
-        from core.piano_core import PianoServer
-        
-        print(f"[后台] 开始重建 PIR 数据...")
-        try:
-            # 重建 db.npy
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM records ORDER BY id ASC")
-            rows = cursor.fetchall()
-            data_bytes = []
-            for row in rows:
-                record = {
-                    "id": row[0],
-                    "record_id": row[1],
-                    "id_card": row[2],
-                    "name": row[3],
-                    "gender": row[4],
-                    "age": row[5],
-                    "admission_date": row[6],
-                    "discharge_date": row[7],
-                    "diagnosis": row[8],
-                    "treatments": json.loads(row[9]),
-                    "prescriptions": json.loads(row[10]),
-                    "lab_results": json.loads(row[11]),
-                    "imaging_reports": row[12],
-                    "doctor_id": row[13],
-                    "doctor_name": row[14],
-                    "department": row[15],
-                    "notes": row[16]
-                }
-                raw = json.dumps(record, ensure_ascii=False).encode('utf-8')
-                if len(raw) < 8192:
-                    raw += b'\x00' * (8192 - len(raw))
-                else:
-                    raw = raw[:8192]
-                data_bytes.append(np.frombuffer(raw, dtype=np.uint8))
-            db_matrix = np.array(data_bytes)
-            np.save(NPY_PATH, db_matrix)
-            conn.close()
-            
-            # 重建预处理表
-            pre = PianoPreprocess(NPY_PATH, NPY_PATH, None)
-            pre.load_db()
-            tables = pre.save_tables(TABLE_PATH)
-            
-            # 更新全局变量
-            global server, piano_tables, DB_SIZE
-            server = PianoServer([row.tobytes() for row in db_matrix])
-            piano_tables = tables
-            DB_SIZE = len(db_matrix)
-            
-            print(f"[后台] ✅ PIR 数据重建完成，总记录数: {DB_SIZE}")
-        except Exception as e:
-            print(f"[后台] ❌ PIR 重建失败: {e}")
+    # 2. 同步重建 PIR 数据（确保新病历立即可查）
+    print("🔄 同步重建 PIR 数据...")
     
-    # 启动后台线程
-    threading.Thread(target=rebuild_pir_data).start()
+    # 重建 db.npy
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM records ORDER BY id ASC")
+    rows = cursor.fetchall()
+    data_bytes = []
+    for row in rows:
+        record = {
+            "id": row[0],
+            "record_id": row[1],
+            "id_card": row[2],
+            "name": row[3],
+            "gender": row[4],
+            "age": row[5],
+            "admission_date": row[6],
+            "discharge_date": row[7],
+            "diagnosis": row[8],
+            "treatments": json.loads(row[9]),
+            "prescriptions": json.loads(row[10]),
+            "lab_results": json.loads(row[11]),
+            "imaging_reports": row[12],
+            "doctor_id": row[13],
+            "doctor_name": row[14],
+            "department": row[15],
+            "notes": row[16]
+        }
+        raw = json.dumps(record, ensure_ascii=False).encode('utf-8')
+        if len(raw) < 8192:
+            raw += b'\x00' * (8192 - len(raw))
+        else:
+            raw = raw[:8192]
+        data_bytes.append(np.frombuffer(raw, dtype=np.uint8))
+    db_matrix = np.array(data_bytes)
+    np.save(NPY_PATH, db_matrix)
+    conn.close()
+
+    # 重建预处理表
+    pre = PianoPreprocess(NPY_PATH, NPY_PATH, None)
+    pre.load_db()
+    tables = pre.save_tables(TABLE_PATH)
+
+    # 更新全局变量
+    global server, piano_tables, DB_SIZE
+    server = PianoServer([row.tobytes() for row in db_matrix])
+    piano_tables = tables
+    DB_SIZE = len(db_matrix)
+
+    print(f"✅ PIR 数据重建完成，总记录数: {DB_SIZE}")
 
     return {
         "success": True,
-        "message": "病历创建成功，PIR 数据正在后台更新",
+        "message": "病历创建成功，PIR 数据已更新",
         "record_id": record_id,
         "index": rowid - 1,
         "doctor": {
@@ -1028,34 +1058,6 @@ def create_record(
         }
     }
 
-# @router.get("/doctors/list")
-# def get_doctors_list(
-#     current_user: User = Depends(get_current_user_required),
-#     db: Session = Depends(get_db),
-#     department: str = None
-# ):
-#     """获取医生列表"""
-#     import sqlite3
-#     import os
-    
-#     BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-#     DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
-    
-#     conn = sqlite3.connect(DB_PATH)
-#     cursor = conn.cursor()
-    
-#     if department:
-#         cursor.execute(
-#             "SELECT username, name, department FROM users WHERE role = 'doctor' AND department = ?",
-#             (department,)
-#         )
-#     else:
-#         cursor.execute("SELECT username, name, department FROM users WHERE role = 'doctor'")
-    
-#     doctors = [{"id": row[0], "name": row[1], "department": row[2]} for row in cursor.fetchall()]
-#     conn.close()
-    
-#     return {"doctors": doctors}
 
 @router.get("/doctors/list")
 def get_doctors_list(
@@ -1078,11 +1080,11 @@ def get_doctors_list(
     if department:
         # ✅ 只改这一行：把 = 换成 LIKE，模糊匹配，立刻查到数据！
         cursor.execute(
-            "SELECT username, name, department FROM users WHERE role = 'doctor' AND department LIKE ?",
+            "SELECT username, name, department FROM users WHERE role = 'DOCTOR' AND department LIKE ?",
             (f"%{department}%",)  # 加%包裹，模糊匹配，绕过编码/隐藏字符问题
         )
     else:
-        cursor.execute("SELECT username, name, department FROM users WHERE role = 'doctor'")
+        cursor.execute("SELECT username, name, department FROM users WHERE role = 'DOCTOR'")
     
     doctors = [{"id": row[0], "name": row[1], "department": row[2]} for row in cursor.fetchall()]
     print(f"【查询到的医生数量】: {len(doctors)}")
