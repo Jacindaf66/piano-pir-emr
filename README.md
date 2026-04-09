@@ -72,17 +72,26 @@ python -m core.piano_preprocess
 # 启动后端服务
 python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
-# 前端安装与运行
-cd frontend
-npm install
-npm run dev
+```
 
-# 访问系统
+###  前端安装与运行
+```bash
+# 进入前端目录
+cd frontend
+
+# 安装依赖
+npm install
+
+# 启动开发服务器
+npm run dev
+```
+
+###  访问系统
 前端地址：http://localhost:5173
 后端 API 文档：http://127.0.0.1:8000/docs
 
 
-# 📁 项目结构
+### 📁 项目结构
 piano-pir-emr/
 ├── backend/                    # 后端代码
 │   ├── app/                    # FastAPI 应用
