@@ -92,6 +92,7 @@ npm run dev
 
 
 ### 📁 项目结构
+```bash
 piano-pir-emr/
 ├── backend/                    # 后端代码
 │   ├── app/                    # FastAPI 应用
@@ -116,3 +117,4 @@ piano-pir-emr/
 │   │   └── router/             # 路由配置
 │   └── public/                 # 静态资源
 └── README.md                   # 项目说明
+```
