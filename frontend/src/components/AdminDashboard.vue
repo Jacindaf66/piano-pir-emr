@@ -268,14 +268,14 @@
               style="width: 220px;"
               :clearable="false"
             />
-            <el-button 
-              type="primary" 
-              size="small" 
-              @click="loadWorkloadRanking"
-              :loading="workloadLoading"
-            >
-              查询
-            </el-button>
+<el-button 
+  type="primary" 
+  size="small" 
+  @click="handleQuery"
+  :loading="workloadLoading"
+>
+  查询
+</el-button>
           </div>
         </div>
       </template>
@@ -352,15 +352,12 @@
             <el-descriptions-item label="总接诊量">{{ selectedDoctor.count }} 人次</el-descriptions-item>
           </el-descriptions>
           <el-divider />
-          <h4>接诊趋势</h4>
-          <div ref="doctorTrendChart" class="small-chart" v-loading="doctorTrendLoading"></div>
-          <el-divider />
           <h4>近期接诊记录</h4>
-          <el-table :data="doctorRecentRecords" size="small" max-height="300">
-            <el-table-column prop="admission_date" label="日期" width="100" />
-            <el-table-column prop="patient_name" label="患者姓名" width="100" />
-            <el-table-column prop="diagnosis" label="诊断" show-overflow-tooltip />
-          </el-table>
+<el-table :data="doctorRecentRecords" size="small" max-height="300" stripe>
+  <el-table-column prop="admission_date" label="接诊日期" width="100" />
+  <el-table-column prop="patient_name" label="患者姓名" width="100" />
+  <el-table-column prop="diagnosis" label="诊断" show-overflow-tooltip />
+</el-table>
         </div>
       </el-drawer>
     </el-card>
@@ -547,31 +544,56 @@ const goToRecords = () => {
 }
 
 // 加载总体统计
+// async function loadOverallStats() {
+//   try {
+//     const res = await axios.get(`${BASE_URL}/stats/overall`)
+//     const current = res.data
+    
+//     // 获取上月数据
+//     const lastMonthRes = await axios.get(`${BASE_URL}/stats/overall/lastmonth`)
+//     const lastMonth = lastMonthRes.data
+    
+//     // 获取昨日数据
+//     const yesterdayRes = await axios.get(`${BASE_URL}/stats/overall/yesterday`)
+//     const yesterday = yesterdayRes.data
+    
+//     overallStats.value = {
+//       ...current,
+//       total_trend: lastMonth.total_records ? ((current.total_records - lastMonth.total_records) / lastMonth.total_records * 100).toFixed(1) : 0,
+//       doctor_trend: lastMonth.doctor_count ? ((current.doctor_count - lastMonth.doctor_count) / lastMonth.doctor_count * 100).toFixed(1) : 0,
+//       today_trend: yesterday.today_new ? ((current.today_new - yesterday.today_new) / yesterday.today_new * 100).toFixed(1) : 0,
+//       month_trend: lastMonth.month_new ? ((current.month_new - lastMonth.month_new) / lastMonth.month_new * 100).toFixed(1) : 0
+//     }
+//   } catch (err) {
+//     console.error('加载统计失败:', err)
+//   }
+// }
 async function loadOverallStats() {
   try {
-    const res = await axios.get(`${BASE_URL}/stats/overall`)
+    const [res, lastMonthRes, yesterdayRes] = await Promise.all([
+      axios.get(`${BASE_URL}/stats/overall`),
+      axios.get(`${BASE_URL}/stats/overall/lastmonth`),
+      axios.get(`${BASE_URL}/stats/overall/yesterday`)
+    ])
+    
     const current = res.data
-    
-    // 获取上月数据
-    const lastMonthRes = await axios.get(`${BASE_URL}/stats/overall/lastmonth`)
     const lastMonth = lastMonthRes.data
-    
-    // 获取昨日数据
-    const yesterdayRes = await axios.get(`${BASE_URL}/stats/overall/yesterday`)
     const yesterday = yesterdayRes.data
     
     overallStats.value = {
-      ...current,
+      total_records: current.total_records,
+      doctor_count: current.doctor_count,
+      month_new: current.month_new,
+      today_new: yesterday.today_new,  // ← 关键修复
       total_trend: lastMonth.total_records ? ((current.total_records - lastMonth.total_records) / lastMonth.total_records * 100).toFixed(1) : 0,
       doctor_trend: lastMonth.doctor_count ? ((current.doctor_count - lastMonth.doctor_count) / lastMonth.doctor_count * 100).toFixed(1) : 0,
-      today_trend: yesterday.today_new ? ((current.today_new - yesterday.today_new) / yesterday.today_new * 100).toFixed(1) : 0,
+      today_trend: yesterday.today_new ? ((yesterday.today_new - yesterday.today_new) / yesterday.today_new * 100).toFixed(1) : 0,
       month_trend: lastMonth.month_new ? ((current.month_new - lastMonth.month_new) / lastMonth.month_new * 100).toFixed(1) : 0
     }
   } catch (err) {
     console.error('加载统计失败:', err)
   }
 }
-
 // 加载科室统计和图表
 async function loadDeptStats() {
   chartLoading.value = true
@@ -586,30 +608,6 @@ async function loadDeptStats() {
   }
 }
 
-// 加载病历列表
-// async function loadRecords() {
-//   loading.value = true
-//   try {
-//     const params = {
-//       limit: props.activeTab === 'dashboard' ? 100 : pageSize.value,
-//       offset: props.activeTab === 'dashboard' ? 0 : (currentPage.value - 1) * pageSize.value
-//     }
-//     if (selectedDept.value && props.activeTab === 'records') {
-//       params.department = selectedDept.value
-//     }
-//     if (searchKeyword.value) {
-//       params.search = searchKeyword.value
-//     }
-    
-//     const res = await axios.get(`${BASE_URL}/records/list`, { params })
-//     records.value = res.data.records
-//     total.value = res.data.total
-//   } catch (err) {
-//     console.error('加载病历列表失败:', err)
-//   } finally {
-//     loading.value = false
-//   }
-// }
 async function loadRecords() {
   loading.value = true
   try {
@@ -934,21 +932,6 @@ async function viewRecord(row) {
   }
 }
 
-// 监听 activeTab 变化
-watch(() => props.activeTab, (newVal) => {
-  if (newVal === 'dashboard') {
-    loadRecords()
-    loadOverallStats()
-    loadDeptStats()
-  }
-  if (newVal === 'records') {
-    loadRecords()
-  }
-  if (newVal === 'doctors') {
-    loadDoctors()
-  }
-})
-
 onMounted(() => {
   loadOverallStats()
   loadDeptStats()
@@ -957,23 +940,20 @@ onMounted(() => {
   initDateRange()
   loadTrendData()
   initWorkloadDateRange()
-  loadDoctorDistribution()
-  loadWorkloadRanking()
-  initAvailableYears()  
-  loadYoYComparison()   
+  loadYoYComparison()
+  initAvailableYears()
   window.addEventListener('resize', () => {
     trendInstance?.resize()
     doctorPieInstance?.resize()
     workloadInstance?.resize()
     yoyInstance?.resize()
   })
-  // 如果当前就是医生管理页面，初始化图表
+  
+  // 只有当前是医生管理页面才加载医生图表
   if (props.activeTab === 'doctors') {
     nextTick(() => {
-      setTimeout(() => {
-        loadDoctorDistribution()
-        loadWorkloadRanking()
-      }, 300)
+      loadDoctorDistribution()
+      loadWorkloadRanking()
     })
   }
 })
@@ -1142,12 +1122,9 @@ const yoyLoading = ref(false)
 const yoyYear = ref(new Date().getFullYear())
 const availableYears = ref([])
 
-// 初始化工作量日期范围（默认最近30天）
+// 初始化工作量日期范围（不设置默认值，显示全部）
 const initWorkloadDateRange = () => {
-  const end = new Date()
-  const start = new Date()
-  start.setDate(end.getDate() - 30)
-  workloadDateRange.value = [start, end]
+  workloadDateRange.value = []  // 空数组表示不限制时间
 }
 
 // 加载科室医生分布图
@@ -1246,51 +1223,34 @@ function updateDoctorPieChart(data) {
   })
 }
 
-//加载医生工作量排行榜
+// 加载医生工作量排行榜
 async function loadWorkloadRanking() {
-  // 非管理员不执行
   if (userInfo.value.role !== 'admin') return
-  // 只在医生管理页面才执行
-  if (props.activeTab !== 'doctors') {
-    console.log('不在医生管理页面，跳过加载工作量排行')
-    return
-  }
-  if (!workloadDateRange.value || workloadDateRange.value.length !== 2) {
-    // 初始化日期范围
-    const end = new Date()
-    const start = new Date()
-    start.setDate(end.getDate() - 30)
-    workloadDateRange.value = [start, end]
-  }
-  
-  // 等待 DOM 渲染
-  await nextTick()
-  
-  // 检查元素
- if (!workloadChart.value) {
-  console.log('workloadChart 元素不存在，使用 DOM 查找')
-  const workloadDom = document.querySelector('.workload-chart')
-  if (workloadDom) {
-    updateWorkloadChartWithDom(workloadDom)
-  } else {
-    setTimeout(() => loadWorkloadRanking(), 500)
-  }
-  return
-}
+  if (props.activeTab !== 'doctors') return
   
   workloadLoading.value = true
   try {
     const params = {
-      start_date: workloadDateRange.value[0].toISOString().split('T')[0],
-      end_date: workloadDateRange.value[1].toISOString().split('T')[0],
-      limit: 100
+      limit: 1000
     }
+    
+    if (workloadDateRange.value && workloadDateRange.value.length === 2) {
+      params.start_date = workloadDateRange.value[0].toISOString().split('T')[0]
+      params.end_date = workloadDateRange.value[1].toISOString().split('T')[0]
+    }
+    
+    if (workloadDeptFilter.value) {
+      params.department = workloadDeptFilter.value
+    }
+    
     const res = await axios.get(`${BASE_URL}/stats/doctor/workload`, { params })
-    console.log('工作量原始数据:', res.data)
+    
     workloadData.value = res.data
     totalWorkload.value = workloadData.value.reduce((sum, d) => sum + d.count, 0)
+    
+    // ⭐ 调用过滤，会自动更新当前视图
     filterWorkloadData()
-    updateWorkloadChart()
+    
   } catch (err) {
     console.error('加载工作量排行失败:', err)
   } finally {
@@ -1322,7 +1282,7 @@ function updateWorkloadChartWithDom(dom) {
     .catch(err => console.error('加载失败:', err))
 }
 
-// 更新工作量排行柱状图（支持滚动）
+// 更新工作量排行柱状图（支持滚动，显示所有医生）
 function updateWorkloadChart() {
   nextTick(() => {
     if (!workloadChart.value) return
@@ -1334,27 +1294,49 @@ function updateWorkloadChart() {
     const names = data.map(item => item.name)
     const counts = data.map(item => item.count)
     
+    console.log('渲染图表，医生数量:', names.length)
+    
+    // 如果没有数据，显示提示
+    if (names.length === 0) {
+      workloadInstance.setOption({
+        title: {
+          text: '暂无数据',
+          left: 'center',
+          top: 'center',
+          textStyle: { color: '#999', fontSize: 14 }
+        }
+      })
+      return
+    }
+    
     const option = {
+      title: {
+        text: workloadDeptFilter.value ? `${workloadDeptFilter.value}医生接诊量排行` : '全院医生接诊量排行',
+        left: 'center',
+        top: 0,
+        textStyle: { fontSize: 14 }
+      },
       tooltip: { 
         trigger: 'axis', 
         axisPointer: { type: 'shadow' }, 
         formatter: '{b}<br/>接诊量: {c} 人'
       },
       grid: { 
-        top: 30, 
-        bottom: 30, 
+        top: 50, 
+        bottom: names.length > 10 ? 50 : 30, 
         left: 100, 
         right: 30, 
         containLabel: true 
       },
-      dataZoom: [
+      // 数据缩放 - 医生数量超过10个时显示滚动条
+      dataZoom: names.length > 10 ? [
         {
           type: 'slider',
-          show: data.length > 10,  // 超过10个医生时显示滚动条
+          show: true,
           start: 0,
-          end: data.length > 10 ? 50 : 100,
+          end: names.length > 20 ? 30 : 50,
           yAxisIndex: 0,
-          bottom: 10
+          bottom: 20
         },
         {
           type: 'inside',
@@ -1362,49 +1344,79 @@ function updateWorkloadChart() {
           zoomOnMouseWheel: true,
           moveOnMouseMove: true
         }
-      ],
+      ] : [],
       xAxis: { 
         type: 'value', 
         name: '接诊量 (人)', 
         nameLocation: 'middle', 
-        nameGap: 40 
+        nameGap: 40,
+        axisLabel: { fontSize: 11 }
       },
       yAxis: { 
         type: 'category', 
         data: names, 
-        axisLabel: { fontSize: 11 } 
+        axisLabel: { 
+          fontSize: 11,
+          rotate: names.length > 15 ? 0 : 0
+        },
+        axisLine: { show: false },
+        axisTick: { show: false }
       },
       series: [{
         type: 'bar',
         data: counts,
         itemStyle: { 
           color: '#2563eb', 
-          borderRadius: [0, 4, 4, 0] 
+          borderRadius: [0, 4, 4, 0],
+          shadowColor: 'rgba(0,0,0,0.1)',
+          shadowBlur: 4
         },
         label: { 
           show: true, 
           position: 'right', 
-          formatter: '{c}' 
-        }
+          formatter: '{c}',
+          fontSize: 11,
+          fontWeight: 'bold'
+        },
+        barWidth: '60%'
       }]
     }
     workloadInstance.setOption(option)
+    
+    // 点击图表查看医生详情
+    workloadInstance.off('click')
+    workloadInstance.on('click', (params) => {
+      if (params.componentType === 'series') {
+        const doctor = filteredWorkloadData.value[params.dataIndex]
+        if (doctor) {
+          viewDoctorDetail(doctor)
+        }
+      }
+    })
   })
 }
 
 // 加载科室同比对比图
 async function loadYoYComparison() {
+  console.log('loadYoYComparison 被调用')
+  console.log('yoyChart.value:', yoyChart.value)
+  console.log('当前 activeTab:', props.activeTab)
+  
   if (!yoyYear.value) return
   
   yoyLoading.value = true
   try {
     const res = await axios.get(`${BASE_URL}/stats/department/yoy`, { 
-      params: { year: yoyYear.value }  // 直接传数字
+      params: { year: yoyYear.value }
     })
+    console.log('同比数据返回:', res.data)
+    console.log('科室数量:', res.data.departments?.length)
+    console.log('今年数据:', res.data.current)
+    console.log('去年数据:', res.data.last_year_counts)
+    
     updateYoYChart(res.data)
   } catch (err) {
     console.error('加载同比数据失败:', err)
-    ElMessage.error('加载同比数据失败')
   } finally {
     yoyLoading.value = false
   }
@@ -1423,7 +1435,22 @@ const initAvailableYears = () => {
 // 更新同比对比图
 function updateYoYChart(data) {
   nextTick(() => {
-    if (!yoyChart.value) return
+    if (!yoyChart.value) {
+      console.warn('yoyChart 元素不存在')
+      return
+    }
+    
+    // 检查数据是否有效
+    if (!data || !data.departments || data.departments.length === 0) {
+      console.warn('同比数据为空')
+      if (yoyInstance) yoyInstance.dispose()
+      yoyInstance = echarts.init(yoyChart.value)
+      yoyInstance.setOption({
+        title: { text: '暂无数据', left: 'center', top: 'center', textStyle: { color: '#999' } }
+      })
+      return
+    }
+    
     if (yoyInstance) yoyInstance.dispose()
     
     yoyInstance = echarts.init(yoyChart.value)
@@ -1462,8 +1489,8 @@ function updateYoYChart(data) {
       grid: { 
         top: 50, 
         bottom: 30, 
-        left: 60, 
-        right: 60,
+        left: 80, 
+        right: 50,
         containLabel: true
       },
       xAxis: { 
@@ -1524,10 +1551,11 @@ function updateYoYChart(data) {
         }
       ]
     }
+    
     yoyInstance.setOption(option)
+    console.log('同比图表渲染完成，科室数量:', data.departments.length)
   })
 }
-
 
 // 医生接诊量排行相关
 const workloadViewType = ref('chart')  // chart 或 table
@@ -1558,9 +1586,8 @@ function filterWorkloadData() {
   
   // 医生姓名搜索
   if (workloadDoctorSearch.value) {
-    filtered = filtered.filter(d => 
-      d.name.includes(workloadDoctorSearch.value)
-    )
+    const keyword = workloadDoctorSearch.value.toLowerCase()
+    filtered = filtered.filter(d => d.name.toLowerCase().includes(keyword))
   }
   
   // 排序
@@ -1573,7 +1600,23 @@ function filterWorkloadData() {
     filtered.sort((a, b) => a.name.localeCompare(b.name))
   }
   
+  // ⭐ 更新表格数据（无论当前是什么视图）
   filteredWorkloadData.value = filtered
+  totalWorkload.value = filteredWorkloadData.value.reduce((sum, d) => sum + d.count, 0)
+  
+  // ⭐ 如果是图表视图，更新图表
+  if (workloadViewType.value === 'chart') {
+    if (workloadChart.value) {
+      updateWorkloadChart()
+    } else {
+      // 如果元素不存在，等待一下再试
+      nextTick(() => {
+        if (workloadChart.value) {
+          updateWorkloadChart()
+        }
+      })
+    }
+  }
 }
 
 // 按接诊量排序
@@ -1605,37 +1648,55 @@ function getPercentage(count) {
   return Math.round((count / totalWorkload.value) * 100)
 }
 
+// 查询按钮点击事件
+const handleQuery = async () => {
+  await loadWorkloadRanking()
+  
+  // 强制刷新图表
+  if (workloadInstance) {
+    workloadInstance.resize()
+  }
+}
+
 // 查看医生详情
 async function viewDoctorDetail(doctor) {
+  console.log('查看医生详情:', doctor)
+  
   selectedDoctor.value = doctor
   showDoctorDetail.value = true
-  doctorTrendLoading.value = true
   
   try {
-    // 获取该医生近12个月的接诊趋势
-    const params = {
-      doctor_name: doctor.name,
-      months: 12
-    }
-    const res = await axios.get(`${BASE_URL}/stats/doctor/trend`, { params })
-    updateDoctorTrendChart(res.data)
+    // 确保传递的是医生名字
+    console.log('请求参数 - 医生名:', doctor.name)
     
-    // 获取该医生近期接诊记录
     const recordsRes = await axios.get(`${BASE_URL}/records/list`, {
       params: {
-        doctor_id: doctor.id,
+        doctor_name: doctor.name,  // 确保这里是 doctor.name
         limit: 10,
         offset: 0
       }
     })
-    doctorRecentRecords.value = recordsRes.data.records
+    
+    console.log('API完整返回:', recordsRes.data)
+    console.log('返回的记录数:', recordsRes.data.records?.length)
+    
+    // 打印每条记录的医生名，验证是否筛选成功
+    recordsRes.data.records?.forEach((record, idx) => {
+      console.log(`记录${idx + 1}: 患者=${record.name}, 医生=${record.doctor_name}`)
+    })
+    
+    // 格式化记录
+    doctorRecentRecords.value = (recordsRes.data.records || []).map(record => ({
+      admission_date: record.admission_date,
+      patient_name: record.name,
+      diagnosis: record.diagnosis
+    }))
+    
   } catch (err) {
     console.error('加载医生详情失败:', err)
-  } finally {
-    doctorTrendLoading.value = false
+    doctorRecentRecords.value = []
   }
 }
-
 // 更新医生趋势图
 function updateDoctorTrendChart(data) {
   nextTick(() => {
@@ -1661,20 +1722,27 @@ function updateDoctorTrendChart(data) {
   })
 }
 
-// 监听 activeTab 变化，当切换到医生管理时初始化图表
-watch(() => props.activeTab, async (newVal) => {
+// 监听 activeTab 变化
+watch(() => props.activeTab, (newVal) => {
+  if (newVal === 'dashboard') {
+    loadRecords()
+    loadOverallStats()
+    loadDeptStats()
+    loadYoYComparison()
+    loadTrendData()
+  }
+  if (newVal === 'records') {
+    loadRecords()
+  }
   if (newVal === 'doctors') {
-    // 等待 DOM 渲染完成
-    await nextTick()
-    // 再等一小段时间确保所有元素都渲染好
+    loadDoctors()
+    // 延迟一下加载图表，确保 DOM 已渲染
     setTimeout(() => {
-      console.log('切换到医生管理，开始初始化图表')
       loadDoctorDistribution()
       loadWorkloadRanking()
-    }, 200)
+    }, 100)
   }
-}, { immediate: true })  // immediate: true 确保初始加载时也执行
-
+})
 </script>
 
 

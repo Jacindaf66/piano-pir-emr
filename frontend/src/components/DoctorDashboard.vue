@@ -604,37 +604,55 @@ function addLabItem() {
 // 加载科室统计
 async function loadDeptStats() {
   try {
-    const res = await axios.get(`${BASE_URL}/stats/department`)
-    if (res.data.stats && res.data.stats.length > 0) {
-      const current = res.data.stats[0]
-      
-      // 获取上月数据用于对比
-      const lastMonthRes = await axios.get(`${BASE_URL}/stats/department/month`, {
+    const today = new Date().toISOString().split('T')[0]
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0]
+    
+    console.log('查询日期:', { today, yesterday })
+    
+    // 并行请求
+    const [deptRes, todayRes, yesterdayRes, lastMonthRes] = await Promise.all([
+      axios.get(`${BASE_URL}/stats/department`),
+      axios.get(`${BASE_URL}/records/list`, {
+        params: { admission_date: today, department: userInfo.value.department, limit: 1 }
+      }),
+      axios.get(`${BASE_URL}/records/list`, {
+        params: { admission_date: yesterday, department: userInfo.value.department, limit: 1 }
+      }),
+      axios.get(`${BASE_URL}/stats/department/month`, {
         params: { department: userInfo.value.department }
       })
-      const lastMonth = lastMonthRes.data.stats?.[0] || { total: 0, month: 0, today: 0 }
-      
-      // 计算环比
-      const totalTrend = lastMonth.total ? ((current.total - lastMonth.total) / lastMonth.total * 100).toFixed(1) : 0
-      const monthTrend = lastMonth.month ? ((current.month - lastMonth.month) / lastMonth.month * 100).toFixed(1) : 0
-      
-      // 获取昨日数据用于今日对比
-      const yesterdayRes = await axios.get(`${BASE_URL}/stats/department/yesterday`, {
-        params: { department: userInfo.value.department }
-      })
-      const yesterday = yesterdayRes.data.stats?.[0] || { today: 0 }
-      const todayTrend = yesterday.today ? ((current.today - yesterday.today) / yesterday.today * 100).toFixed(1) : 0
-      
-      deptStats.value = {
-        ...current,
-        totalTrend: parseFloat(totalTrend),
-        monthTrend: parseFloat(monthTrend),
-        todayTrend: parseFloat(todayTrend)
-      }
+    ])
+    
+    const current = deptRes.data.stats?.[0] || {}
+    const lastMonth = lastMonthRes.data.stats?.[0] || { total: 0, month: 0 }
+    const todayNew = todayRes.data.total      // 今日新增
+    const yesterdayNew = yesterdayRes.data.total  // 昨日新增（直接查询，最准确）
+    
+    console.log('今日新增:', todayNew, '昨日新增:', yesterdayNew)
+    
+    // 计算环比
+    const totalTrend = lastMonth.total ? ((current.total - lastMonth.total) / lastMonth.total * 100).toFixed(1) : 0
+    const monthTrend = lastMonth.month ? ((current.month - lastMonth.month) / lastMonth.month * 100).toFixed(1) : 0
+    
+    let todayTrend = 0
+    if (yesterdayNew === 0 && todayNew > 0) {
+      todayTrend = 100
+    } else if (yesterdayNew > 0) {
+      todayTrend = ((todayNew - yesterdayNew) / yesterdayNew * 100).toFixed(1)
     }
+    
+    deptStats.value = {
+      total: current.total || 0,
+      month: current.month || 0,
+      today: todayNew,
+      totalTrend: parseFloat(totalTrend),
+      monthTrend: parseFloat(monthTrend),
+      todayTrend: parseFloat(todayTrend)
+    }
+    
+    console.log('最终统计:', deptStats.value)
   } catch (err) {
     console.error('加载科室统计失败:', err)
-    ElMessage.error('加载统计数据失败')
   }
 }
 
@@ -893,6 +911,7 @@ async function createRecord() {
       
       // 重新加载病历列表
       await loadRecords()
+      await loadDeptStats()
       
       // ⭐ 延迟1秒后重新加载整个页面数据
       setTimeout(() => {
@@ -912,6 +931,7 @@ watch(() => props.activeTab, val => {
   if (val === 'dashboard') {
     loadDeptStats()
     loadAllRecordsForChart()
+    loadTrendData() 
   } else if (val === 'records') {
     loadRecords()
   }

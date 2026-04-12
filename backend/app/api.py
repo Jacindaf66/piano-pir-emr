@@ -364,16 +364,6 @@ def get_hint(sample_size: int = 10, current_user: User = Depends(get_current_use
     hints = {str(i): db_matrix[i].tolist() for i in indices}
     return hints
 
-# @router.post("/query")
-# def post_query(query: bytes, current_user: User = Depends(get_current_user_required)):
-#     """执行 PIR 查询"""
-#     if server is None:
-#         raise HTTPException(status_code=503, detail="PIR服务未初始化")
-#     try:
-#         answer = server.process_query(query)
-#         return {"answer": answer}
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/query")
 async def post_query(
@@ -409,6 +399,7 @@ async def post_query(
 # 医生专用接口
 # ======================
 
+# ============ 医生仪表盘数据 ============
 @router.get("/doctor/dashboard")
 def doctor_dashboard(current_user: User = Depends(get_current_user_required)):
     """医生仪表盘数据"""
@@ -423,6 +414,7 @@ def doctor_dashboard(current_user: User = Depends(get_current_user_required)):
         "archive_rate": "91.8%"
     }
 
+# ============ 总体统计（管理员） ============
 @router.get("/stats/overall")
 def get_overall_stats(current_user: User = Depends(get_current_user_required), db: Session = Depends(get_db)):
     """获取总体统计（仅管理员）"""
@@ -467,7 +459,60 @@ def get_overall_stats(current_user: User = Depends(get_current_user_required), d
         "month_new": month_new
     }
 
-
+# ============ 科室详细统计 ============
+# @router.get("/stats/department")
+# def get_department_stats_detailed(current_user: User = Depends(get_current_user_required), db: Session = Depends(get_db)):
+#     """获取科室详细统计（包含今日和本月新增）"""
+#     import sqlite3
+#     import os
+#     from datetime import datetime, timedelta
+    
+#     BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+#     DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+#     conn = sqlite3.connect(DB_PATH)
+#     cursor = conn.cursor()
+    
+#     today = datetime.now().strftime('%Y-%m-%d')
+#     month_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    
+#     if current_user.role == Role.ADMIN:
+#         # 管理员：统计所有科室
+#         cursor.execute("""
+#             SELECT department, COUNT(*) as total,
+#                    SUM(CASE WHEN admission_date = ? THEN 1 ELSE 0 END) as today_count,
+#                    SUM(CASE WHEN admission_date >= ? THEN 1 ELSE 0 END) as month_count
+#             FROM records 
+#             GROUP BY department
+#         """, (today, month_ago))
+#     else:
+#         # 医生：只统计自己科室
+#         cursor.execute("""
+#             SELECT department, COUNT(*) as total,
+#                    SUM(CASE WHEN admission_date = ? THEN 1 ELSE 0 END) as today_count,
+#                    SUM(CASE WHEN admission_date >= ? THEN 1 ELSE 0 END) as month_count
+#             FROM records 
+#             WHERE department = ?
+#             GROUP BY department
+#         """, (today, month_ago, current_user.department))
+    
+#     results = cursor.fetchall()
+#     conn.close()
+    
+#     stats = []
+#     for row in results:
+#         stats.append({
+#             "department": row[0],
+#             "total": row[1],
+#             "today": row[2] or 0,
+#             "month": row[3] or 0
+#         })
+    
+#     return {
+#         "stats": stats,
+#         "user_role": current_user.role.value,
+#         "user_department": current_user.department
+#     }
 @router.get("/stats/department")
 def get_department_stats_detailed(current_user: User = Depends(get_current_user_required), db: Session = Depends(get_db)):
     """获取科室详细统计（包含今日和本月新增）"""
@@ -487,18 +532,22 @@ def get_department_stats_detailed(current_user: User = Depends(get_current_user_
     if current_user.role == Role.ADMIN:
         # 管理员：统计所有科室
         cursor.execute("""
-            SELECT department, COUNT(*) as total,
-                   SUM(CASE WHEN admission_date = ? THEN 1 ELSE 0 END) as today_count,
-                   SUM(CASE WHEN admission_date >= ? THEN 1 ELSE 0 END) as month_count
+            SELECT 
+                department,
+                COUNT(*) as total,
+                SUM(CASE WHEN admission_date = ? THEN 1 ELSE 0 END) as today_count,
+                SUM(CASE WHEN admission_date >= ? THEN 1 ELSE 0 END) as month_count
             FROM records 
             GROUP BY department
         """, (today, month_ago))
     else:
         # 医生：只统计自己科室
         cursor.execute("""
-            SELECT department, COUNT(*) as total,
-                   SUM(CASE WHEN admission_date = ? THEN 1 ELSE 0 END) as today_count,
-                   SUM(CASE WHEN admission_date >= ? THEN 1 ELSE 0 END) as month_count
+            SELECT 
+                department,
+                COUNT(*) as total,
+                SUM(CASE WHEN admission_date = ? THEN 1 ELSE 0 END) as today_count,
+                SUM(CASE WHEN admission_date >= ? THEN 1 ELSE 0 END) as month_count
             FROM records 
             WHERE department = ?
             GROUP BY department
@@ -516,13 +565,22 @@ def get_department_stats_detailed(current_user: User = Depends(get_current_user_
             "month": row[3] or 0
         })
     
+    # 如果医生科室没有数据，返回默认值
+    if not stats and current_user.role != Role.ADMIN:
+        stats.append({
+            "department": current_user.department,
+            "total": 0,
+            "today": 0,
+            "month": 0
+        })
+    
     return {
         "stats": stats,
         "user_role": current_user.role.value,
         "user_department": current_user.department
     }
 
-
+# ============ 用户列表查询（管理员） ============
 @router.get("/users/list")
 def get_users_list(current_user: User = Depends(get_current_user_required), db: Session = Depends(get_db)):
     """获取所有医生列表（仅管理员）"""
@@ -545,7 +603,7 @@ def get_users_list(current_user: User = Depends(get_current_user_required), db: 
         ]
     }
 
-
+# ============ 删除医生账号（管理员） ============
 @router.delete("/admin/delete-user/{user_id}")
 def delete_user(
     user_id: int,
@@ -565,7 +623,7 @@ def delete_user(
     
     return {"message": "删除成功"}
 
-
+# ============ 重置医生密码（管理员） ============
 @router.post("/admin/reset-password/{user_id}")
 def reset_password(
     user_id: int,
@@ -590,208 +648,12 @@ def reset_password(
     
     return {"message": "密码重置成功"}
 
+# ============ 检查用户名是否存在 ============
 @router.get("/check-username/{username}")
 def check_username(username: str, db: Session = Depends(get_db)):
     """检查用户名是否已存在（用于前端实时验证）"""
     user = db.query(User).filter(User.username == username).first()
     return {"exists": user is not None, "available": user is None}
-
-# 保留旧的（可选）
-@router.get("/department/stats")
-def get_department_stats_old(current_user: User = Depends(get_current_user_required), db: Session = Depends(get_db)):
-    """获取各科室病历统计（旧版本，只返回总数）"""
-    import sqlite3
-    import os
-    
-    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
-    
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    if current_user.role == Role.ADMIN:
-        cursor.execute("""
-            SELECT department, COUNT(*) as count 
-            FROM records 
-            GROUP BY department
-        """)
-    else:
-        cursor.execute("""
-            SELECT department, COUNT(*) as count 
-            FROM records 
-            WHERE department = ?
-            GROUP BY department
-        """, (current_user.department,))
-    
-    results = cursor.fetchall()
-    conn.close()
-    
-    return {
-        "stats": [{"department": row[0], "count": row[1]} for row in results],
-        "user_role": current_user.role.value,
-        "user_department": current_user.department
-    }
-
-# @router.get("/records/list")
-# def get_records_list(
-#     current_user: User = Depends(get_current_user_required),
-#     db: Session = Depends(get_db),
-#     limit: int = 100,
-#     offset: int = 0,
-#     department: str = None
-# ):
-#     """获取病历列表（支持分页和科室筛选）"""
-#     import sqlite3
-#     import os
-    
-#     BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-#     DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
-    
-#     conn = sqlite3.connect(DB_PATH)
-#     conn.row_factory = sqlite3.Row
-#     cursor = conn.cursor()
-    
-#     # 使用子查询来获取行号
-#     # 首先获取符合条件的记录总数和排序后的记录
-#     conditions = []
-#     params = []
-    
-#     if current_user.role != Role.ADMIN:
-#         conditions.append("department = ?")
-#         params.append(current_user.department)
-    
-#     if department and current_user.role == Role.ADMIN:
-#         conditions.append("department = ?")
-#         params.append(department)
-    
-#     # 构建 WHERE 子句
-#     where_clause = ""
-#     if conditions:
-#         where_clause = " WHERE " + " AND ".join(conditions)
-    
-#     # 获取总数
-#     count_query = f"SELECT COUNT(*) FROM records{where_clause}"
-#     cursor.execute(count_query, params)
-#     total = cursor.fetchone()[0]
-    
-#     # 获取带行号的记录（使用 ROW_NUMBER）
-#     query = f"""
-#         SELECT 
-#             (SELECT COUNT(*) FROM records r2 
-#              WHERE r2.admission_date > r1.admission_date 
-#                 OR (r2.admission_date = r1.admission_date AND r2.record_id > r1.record_id)
-#             ) as idx,
-#             record_id, name, gender, age, department, admission_date, diagnosis, doctor_id
-#         FROM records r1
-#         {where_clause}
-#         ORDER BY admission_date DESC, record_id DESC
-#         LIMIT ? OFFSET ?
-#     """
-#     params.extend([limit, offset])
-    
-#     cursor.execute(query, params)
-#     rows = cursor.fetchall()
-    
-#     records = []
-#     for row in rows:
-#         records.append({
-#             "index": row["idx"],  # 使用 ROW_NUMBER 生成的索引
-#             "record_id": row["record_id"],
-#             "name": row["name"],
-#             "gender": row["gender"],
-#             "age": row["age"],
-#             "department": row["department"],
-#             "admission_date": row["admission_date"],
-#             "diagnosis": row["diagnosis"],
-#             "doctor_id": row["doctor_id"]
-#         })
-    
-#     conn.close()
-    
-#     return {
-#         "records": records,
-#         "total": total,
-#         "limit": limit,
-#         "offset": offset
-#     }
-
-@router.get("/records/list")
-def get_records_list(
-    current_user: User = Depends(get_current_user_required),
-    limit: int = 100,
-    offset: int = 0,
-    department: str = None,
-    search: str = None
-):
-    """获取病历列表"""
-    import sqlite3
-    import os
-    
-    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
-    
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    conditions = []
-    params = []
-    
-    if current_user.role != Role.ADMIN:
-        conditions.append("department = ?")
-        params.append(current_user.department)
-    
-    if department and current_user.role == Role.ADMIN:
-        conditions.append("department = ?")
-        params.append(department)
-    
-    if search and search.strip():
-        conditions.append("(record_id LIKE ? OR name LIKE ?)")
-        search_pattern = f"%{search.strip()}%"
-        params.append(search_pattern)
-        params.append(search_pattern)
-    
-    where_clause = ""
-    if conditions:
-        where_clause = " WHERE " + " AND ".join(conditions)
-    
-    # 总数
-    cursor.execute(f"SELECT COUNT(*) FROM records{where_clause}", params)
-    total = cursor.fetchone()[0]
-    
-    # 【关键】用 id 作为真实索引
-    query = f"""
-        SELECT id, record_id, name, gender, age, department, 
-               admission_date, diagnosis, doctor_id, doctor_name
-        FROM records{where_clause}
-        ORDER BY admission_date DESC, record_id DESC
-        LIMIT ? OFFSET ?
-    """
-    cursor.execute(query, params + [limit, offset])
-    rows = cursor.fetchall()
-    
-    records = []
-    for row in rows:
-        records.append({
-            "index": row[0] - 1,  # id 从1开始，转为0-based
-            "record_id": row[1],
-            "name": row[2],
-            "gender": row[3],
-            "age": row[4],
-            "department": row[5],
-            "admission_date": row[6],
-            "diagnosis": row[7],
-            "doctor_id": row[8],
-            "doctor_name": row[9]
-        })
-    
-    conn.close()
-    
-    return {
-        "records": records,
-        "total": total,
-        "limit": limit,
-        "offset": offset
-    }
 
 # 添加病历请求模型
 class CreateRecordRequest(BaseModel):
@@ -808,135 +670,7 @@ class CreateRecordRequest(BaseModel):
     imaging_reports: str = ""
     notes: str = ""
 
-
-# @router.post("/records/create")
-# def create_record(
-#     req: CreateRecordRequest,
-#     current_user: User = Depends(get_current_user_required),
-#     db: Session = Depends(get_db)
-# ):
-#     """创建新病历 - 后台异步重建 PIR 数据"""
-#     import sqlite3
-#     import json
-#     import os
-#     import random
-#     import threading
-#     from datetime import datetime, timedelta
-
-#     BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-#     DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
-#     TABLE_PATH = os.path.join(BASE_DIR, 'storage', 'piano_tables.json') 
-
-#     # 1. 生成病历号
-#     record_id = f"MR-{datetime.now().strftime('%Y%m%d')}-{random.randint(10000, 99999)}"
-#     adm_date = datetime.strptime(req.admission_date, "%Y-%m-%d")
-#     disc_date = adm_date + timedelta(days=random.randint(3, 10))
-
-#     conn = sqlite3.connect(DB_PATH)
-#     cursor = conn.cursor()
-#     cursor.execute(
-#         "SELECT username, name FROM users WHERE role = 'DOCTOR' AND department = ?",
-#         (req.department,)
-#     )
-#     doctors = cursor.fetchall()
-#     doctor_id, doctor_name = random.choice(doctors) if doctors else ("doc001", "张明")
-
-#     treatments_json = json.dumps(req.treatments, ensure_ascii=False)
-#     prescriptions_json = json.dumps(req.prescriptions, ensure_ascii=False)
-#     lab_results_json = json.dumps(req.lab_results, ensure_ascii=False)
-
-#     # 2. 插入记录
-#     cursor.execute('''
-#         INSERT INTO records (
-#             record_id, id_card, name, gender, age,
-#             admission_date, discharge_date, diagnosis,
-#             treatments, prescriptions, lab_results,
-#             imaging_reports, doctor_id, doctor_name, department, notes
-#         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-#     ''', (
-#         record_id, req.id_card, req.name, req.gender, req.age,
-#         req.admission_date, disc_date.strftime("%Y-%m-%d"), req.diagnosis,
-#         treatments_json, prescriptions_json, lab_results_json,
-#         req.imaging_reports, doctor_id, doctor_name, req.department, req.notes
-#     ))
-#     conn.commit()
-#     cursor.execute("SELECT last_insert_rowid()")
-#     rowid = cursor.fetchone()[0]
-#     conn.close()
-
-#     # 3. 后台异步重建 PIR 数据
-#     def rebuild_pir_data():
-#         import numpy as np
-#         from core.piano_preprocess import PianoPreprocess
-#         from core.piano_core import PianoServer
-        
-#         print(f"[后台] 开始重建 PIR 数据...")
-#         try:
-#             # 重建 db.npy
-#             conn = sqlite3.connect(DB_PATH)
-#             cursor = conn.cursor()
-#             cursor.execute("SELECT * FROM records ORDER BY id ASC")
-#             rows = cursor.fetchall()
-#             data_bytes = []
-#             for row in rows:
-#                 record = {
-#                     "id": row[0],
-#                     "record_id": row[1],
-#                     "id_card": row[2],
-#                     "name": row[3],
-#                     "gender": row[4],
-#                     "age": row[5],
-#                     "admission_date": row[6],
-#                     "discharge_date": row[7],
-#                     "diagnosis": row[8],
-#                     "treatments": json.loads(row[9]),
-#                     "prescriptions": json.loads(row[10]),
-#                     "lab_results": json.loads(row[11]),
-#                     "imaging_reports": row[12],
-#                     "doctor_id": row[13],
-#                     "doctor_name": row[14],
-#                     "department": row[15],
-#                     "notes": row[16]
-#                 }
-#                 raw = json.dumps(record, ensure_ascii=False).encode('utf-8')
-#                 if len(raw) < 8192:
-#                     raw += b'\x00' * (8192 - len(raw))
-#                 else:
-#                     raw = raw[:8192]
-#                 data_bytes.append(np.frombuffer(raw, dtype=np.uint8))
-#             db_matrix = np.array(data_bytes)
-#             np.save(NPY_PATH, db_matrix)
-#             conn.close()
-            
-#             # 重建预处理表
-#             pre = PianoPreprocess(NPY_PATH, NPY_PATH, None)
-#             pre.load_db()
-#             tables = pre.save_tables(TABLE_PATH)
-            
-#             # 更新全局变量
-#             global server, piano_tables, DB_SIZE
-#             server = PianoServer([row.tobytes() for row in db_matrix])
-#             piano_tables = tables
-#             DB_SIZE = len(db_matrix)
-            
-#             print(f"[后台] ✅ PIR 数据重建完成，总记录数: {DB_SIZE}")
-#         except Exception as e:
-#             print(f"[后台] ❌ PIR 重建失败: {e}")
-    
-#     # 启动后台线程
-#     threading.Thread(target=rebuild_pir_data).start()
-
-#     return {
-#         "success": True,
-#         "message": "病历创建成功，PIR 数据正在后台更新",
-#         "record_id": record_id,
-#         "index": rowid - 1,
-#         "doctor": {
-#             "id": doctor_id,
-#             "name": doctor_name
-#         }
-#     }
-
+# ============ 创建新病历 ============
 @router.post("/records/create")
 def create_record(
     req: CreateRecordRequest,
@@ -1058,7 +792,7 @@ def create_record(
         }
     }
 
-
+# ============ 医生列表查询 ============
 @router.get("/doctors/list")
 def get_doctors_list(
     current_user: User = Depends(get_current_user_required),
@@ -1078,7 +812,6 @@ def get_doctors_list(
     print(f"【接口收到的科室】: '{department}'")
 
     if department:
-        # ✅ 只改这一行：把 = 换成 LIKE，模糊匹配，立刻查到数据！
         cursor.execute(
             "SELECT username, name, department FROM users WHERE role = 'DOCTOR' AND department LIKE ?",
             (f"%{department}%",)  # 加%包裹，模糊匹配，绕过编码/隐藏字符问题
@@ -1092,6 +825,263 @@ def get_doctors_list(
     
     return {"doctors": doctors}
 
+# ============ 病历列表查询 ============
+# @router.get("/records/list")
+# def get_records_list(
+#     current_user: User = Depends(get_current_user_required),
+#     limit: int = 100,
+#     offset: int = 0,
+#     department: str = None,
+#     doctor_name: str = None, 
+#     search: str = None
+# ):
+#     """获取病历列表（支持科室、医生、搜索筛选）"""
+#     import sqlite3
+#     import os
+    
+#     BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+#     DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+#     conn = sqlite3.connect(DB_PATH)
+#     cursor = conn.cursor()
+    
+#     conditions = []
+#     params = []
+    
+#     # 权限控制
+#     if current_user.role != Role.ADMIN:
+#         conditions.append("department = ?")
+#         params.append(current_user.department)
+    
+#     # 科室筛选（仅管理员）
+#     if department and current_user.role == Role.ADMIN:
+#         conditions.append("department = ?")
+#         params.append(department)
+    
+#     # 医生筛选（新增）
+#     if doctor_name:
+#         conditions.append("doctor_name = ?")
+#         params.append(doctor_name)
+#         print(f"🔍 筛选医生: {doctor_name}")  # 添加日志
+    
+#     # 搜索筛选
+#     if search and search.strip():
+#         conditions.append("(record_id LIKE ? OR name LIKE ?)")
+#         search_pattern = f"%{search.strip()}%"
+#         params.append(search_pattern)
+#         params.append(search_pattern)
+    
+#     where_clause = ""
+#     if conditions:
+#         where_clause = " WHERE " + " AND ".join(conditions)
+    
+#      # 打印最终查询（调试用）
+#     print(f"📝 SQL: {where_clause}")
+#     print(f"📝 参数: {params}")
+    
+#     # 总数
+#     cursor.execute(f"SELECT COUNT(*) FROM records{where_clause}", params)
+#     total = cursor.fetchone()[0]
+    
+#     # 查询数据
+#     query = f"""
+#         SELECT id, record_id, name, gender, age, department, 
+#                admission_date, diagnosis, doctor_id, doctor_name
+#         FROM records{where_clause}
+#         ORDER BY admission_date DESC, record_id DESC
+#         LIMIT ? OFFSET ?
+#     """
+#     cursor.execute(query, params + [limit, offset])
+#     rows = cursor.fetchall()
+    
+#     records = []
+#     for row in rows:
+#         records.append({
+#             "index": row[0] - 1,
+#             "record_id": row[1],
+#             "name": row[2],
+#             "gender": row[3],
+#             "age": row[4],
+#             "department": row[5],
+#             "admission_date": row[6],
+#             "diagnosis": row[7],
+#             "doctor_id": row[8],
+#             "doctor_name": row[9]
+#         })
+    
+#     conn.close()
+    
+#     return {
+#         "records": records,
+#         "total": total,
+#         "limit": limit,
+#         "offset": offset
+#     }
+# ============ 病历列表查询 ============
+@router.get("/records/list")
+def get_records_list(
+    current_user: User = Depends(get_current_user_required),
+    limit: int = 100,
+    offset: int = 0,
+    department: str = None,
+    doctor_name: str = None,
+    admission_date: str = None,  # ← 添加这个参数
+    search: str = None
+):
+    """获取病历列表（支持科室、医生、入院日期、搜索筛选）"""
+    import sqlite3
+    import os
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    conditions = []
+    params = []
+    
+    # 权限控制
+    if current_user.role != Role.ADMIN:
+        conditions.append("department = ?")
+        params.append(current_user.department)
+    
+    # 科室筛选（仅管理员）
+    if department and current_user.role == Role.ADMIN:
+        conditions.append("department = ?")
+        params.append(department)
+    
+    # 医生筛选
+    if doctor_name:
+        conditions.append("doctor_name = ?")
+        params.append(doctor_name)
+        print(f"🔍 筛选医生: {doctor_name}")
+    
+    # ⭐ 入院日期筛选
+    if admission_date:
+        conditions.append("admission_date = ?")
+        params.append(admission_date)
+        print(f"📅 筛选日期: {admission_date}")
+    
+    # 搜索筛选
+    if search and search.strip():
+        conditions.append("(record_id LIKE ? OR name LIKE ?)")
+        search_pattern = f"%{search.strip()}%"
+        params.append(search_pattern)
+        params.append(search_pattern)
+    
+    where_clause = ""
+    if conditions:
+        where_clause = " WHERE " + " AND ".join(conditions)
+    
+    print(f"📝 SQL: {where_clause}")
+    print(f"📝 参数: {params}")
+    
+    # 总数
+    cursor.execute(f"SELECT COUNT(*) FROM records{where_clause}", params)
+    total = cursor.fetchone()[0]
+    
+    # 查询数据
+    query = f"""
+        SELECT id, record_id, name, gender, age, department, 
+               admission_date, diagnosis, doctor_id, doctor_name
+        FROM records{where_clause}
+        ORDER BY admission_date DESC, record_id DESC
+        LIMIT ? OFFSET ?
+    """
+    cursor.execute(query, params + [limit, offset])
+    rows = cursor.fetchall()
+    
+    records = []
+    for row in rows:
+        records.append({
+            "index": row[0] - 1,
+            "record_id": row[1],
+            "name": row[2],
+            "gender": row[3],
+            "age": row[4],
+            "department": row[5],
+            "admission_date": row[6],
+            "diagnosis": row[7],
+            "doctor_id": row[8],
+            "doctor_name": row[9]
+        })
+    
+    conn.close()
+    
+    return {
+        "records": records,
+        "total": total,
+        "limit": limit,
+        "offset": offset
+    }
+
+# ============ 医生接诊统计排行 ============
+@router.get("/stats/doctors")
+def get_doctor_stats(
+    current_user: User = Depends(get_current_user_required),
+    department: str = None
+):
+    """获取医生接诊数量统计排行"""
+    import sqlite3
+    import os
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # 权限控制：非管理员只能看自己科室
+    if current_user.role != Role.ADMIN:
+        dept_filter = current_user.department
+    else:
+        dept_filter = department if department else None
+    
+    # 查询医生接诊数量
+    if dept_filter:
+        cursor.execute("""
+            SELECT 
+                doctor_name,
+                doctor_id,
+                department,
+                COUNT(*) as patient_count
+            FROM records 
+            WHERE department = ?
+            GROUP BY doctor_name, doctor_id, department
+            ORDER BY patient_count DESC
+        """, (dept_filter,))
+    else:
+        cursor.execute("""
+            SELECT 
+                doctor_name,
+                doctor_id,
+                department,
+                COUNT(*) as patient_count
+            FROM records 
+            GROUP BY doctor_name, doctor_id, department
+            ORDER BY patient_count DESC
+        """)
+    
+    results = cursor.fetchall()
+    conn.close()
+    
+    doctors = []
+    for row in results:
+        doctors.append({
+            "doctor_name": row[0],
+            "doctor_id": row[1],
+            "department": row[2],
+            "patient_count": row[3]
+        })
+    
+    return {
+        "success": True,
+        "doctors": doctors,
+        "total": len(doctors)
+    }
+
+# ============ PIR 总记录数查询 ============
 @router.get("/stats/total")
 def get_total_stats(current_user: User = Depends(get_current_user_required)):
     """获取总记录数（基础+增量）"""
@@ -1099,6 +1089,7 @@ def get_total_stats(current_user: User = Depends(get_current_user_required)):
         return {"total_records": server.get_current_total_count()}
     return {"total_records": 0}
 
+# ============ PIR 预处理表获取 ============
 @router.get("/piano/tables")
 def get_piano_tables(current_user: User = Depends(get_current_user_required)):
     import json
@@ -1110,6 +1101,7 @@ def get_piano_tables(current_user: User = Depends(get_current_user_required)):
             return json.load(f)
     return {"primary_table": [], "backup_table": {}, "replacement_entries": {}, "params": {}}
 
+# ============ 科室月度统计 ============
 @router.get("/stats/department/month")
 def get_department_stats_month(
     current_user: User = Depends(get_current_user_required),
@@ -1171,13 +1163,103 @@ def get_department_stats_month(
         }]
     }
 
+# ============ 科室昨日统计 ============
+# @router.get("/stats/department/yesterday")
+# def get_department_stats_yesterday(
+#     current_user: User = Depends(get_current_user_required),
+#     department: str = None
+# ):
+#     """获取昨日科室统计"""
+#     import sqlite3
+#     import os
+#     from datetime import datetime, timedelta
+    
+#     BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+#     DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+#     conn = sqlite3.connect(DB_PATH)
+#     cursor = conn.cursor()
+    
+#     yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    
+#     if current_user.role != Role.ADMIN and department:
+#         dept_filter = department
+#     elif current_user.role != Role.ADMIN:
+#         dept_filter = current_user.department
+#     else:
+#         dept_filter = department
+    
+#     if dept_filter:
+#         cursor.execute("""
+#             SELECT COUNT(*) FROM records 
+#             WHERE department = ? AND admission_date = ?
+#         """, (dept_filter, yesterday))
+#     else:
+#         cursor.execute("""
+#             SELECT COUNT(*) FROM records 
+#             WHERE admission_date = ?
+#         """, (yesterday,))
+    
+#     count = cursor.fetchone()[0] or 0
+#     conn.close()
+    
+#     return {
+#         "stats": [{"today": count}]
+#     }
 
-@router.get("/stats/department/yesterday")
-def get_department_stats_yesterday(
-    current_user: User = Depends(get_current_user_required),
-    department: str = None
-):
-    """获取昨日科室统计"""
+# ============ 上月总体统计 ============
+@router.get("/stats/overall/lastmonth")
+def get_overall_stats_lastmonth(current_user: User = Depends(get_current_user_required)):
+    """获取上月总体统计（用于同比）"""
+    if current_user.role != Role.ADMIN:
+        raise HTTPException(status_code=403, detail="无权限")
+    
+    import sqlite3
+    import os
+    from datetime import datetime, timedelta
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    today = datetime.now()
+    first_day_this_month = today.replace(day=1)
+    last_day_last_month = first_day_this_month - timedelta(days=1)
+    first_day_last_month = last_day_last_month.replace(day=1)
+    
+    start = first_day_last_month.strftime("%Y-%m-%d")
+    end = last_day_last_month.strftime("%Y-%m-%d")
+    
+    # 上月总病历数
+    cursor.execute("SELECT COUNT(*) FROM records WHERE admission_date <= ?", (end,))
+    total_records = cursor.fetchone()[0]
+    
+    # 上月医生总数
+    cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'doctor'")
+    doctor_count = cursor.fetchone()[0]
+    
+    # 上月新增病历数
+    cursor.execute("SELECT COUNT(*) FROM records WHERE admission_date BETWEEN ? AND ?", (start, end))
+    month_new = cursor.fetchone()[0]
+    
+    conn.close()
+    
+    return {
+        "total_records": total_records,
+        "doctor_count": doctor_count,
+        "month_new": month_new,
+        "today_new": 0
+    }
+
+# ============ 昨日总体统计 ============
+@router.get("/stats/overall/yesterday")
+def get_overall_stats_yesterday(current_user: User = Depends(get_current_user_required)):
+    """获取昨日总体统计（用于今日对比）"""
+    if current_user.role != Role.ADMIN:
+        raise HTTPException(status_code=403, detail="无权限")
+    
     import sqlite3
     import os
     from datetime import datetime, timedelta
@@ -1190,31 +1272,14 @@ def get_department_stats_yesterday(
     
     yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     
-    if current_user.role != Role.ADMIN and department:
-        dept_filter = department
-    elif current_user.role != Role.ADMIN:
-        dept_filter = current_user.department
-    else:
-        dept_filter = department
+    cursor.execute("SELECT COUNT(*) FROM records WHERE admission_date = ?", (yesterday,))
+    today_new = cursor.fetchone()[0]
     
-    if dept_filter:
-        cursor.execute("""
-            SELECT COUNT(*) FROM records 
-            WHERE department = ? AND admission_date = ?
-        """, (dept_filter, yesterday))
-    else:
-        cursor.execute("""
-            SELECT COUNT(*) FROM records 
-            WHERE admission_date = ?
-        """, (yesterday,))
-    
-    count = cursor.fetchone()[0] or 0
     conn.close()
     
-    return {
-        "stats": [{"today": count}]
-    }
+    return {"today_new": today_new}
 
+# ============ 病历趋势统计 ============
 @router.get("/stats/trend")
 def get_trend_stats(
     current_user: User = Depends(get_current_user_required),
@@ -1320,149 +1385,7 @@ def get_trend_stats(
         "end_date": end_date
     }
 
-    @router.get("/stats/overall/lastmonth")
-    def get_overall_stats_lastmonth(current_user: User = Depends(get_current_user_required)):
-        """获取上月总体统计（用于同比）"""
-        if current_user.role != Role.ADMIN:
-            raise HTTPException(status_code=403, detail="无权限")
-    
-    import sqlite3
-    import os
-    from datetime import datetime, timedelta
-    
-    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
-    
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    today = datetime.now()
-    first_day_this_month = today.replace(day=1)
-    last_day_last_month = first_day_this_month - timedelta(days=1)
-    first_day_last_month = last_day_last_month.replace(day=1)
-    
-    start = first_day_last_month.strftime("%Y-%m-%d")
-    end = last_day_last_month.strftime("%Y-%m-%d")
-    
-    # 上月新增病历数
-    cursor.execute("SELECT COUNT(*) FROM records WHERE admission_date BETWEEN ? AND ?", (start, end))
-    month_new = cursor.fetchone()[0]
-    
-    # 上月医生总数
-    cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'doctor'")
-    doctor_count = cursor.fetchone()[0]
-    
-    # 上月总病历数
-    cursor.execute("SELECT COUNT(*) FROM records")
-    total_records = cursor.fetchone()[0]
-    
-    conn.close()
-    
-    return {
-        "total_records": total_records,
-        "doctor_count": doctor_count,
-        "month_new": month_new,
-        "today_new": 0
-    }
-
-
-@router.get("/stats/overall/yesterday")
-def get_overall_stats_yesterday(current_user: User = Depends(get_current_user_required)):
-    """获取昨日总体统计（用于今日对比）"""
-    if current_user.role != Role.ADMIN:
-        raise HTTPException(status_code=403, detail="无权限")
-    
-    import sqlite3
-    import os
-    from datetime import datetime, timedelta
-    
-    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
-    
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-    
-    cursor.execute("SELECT COUNT(*) FROM records WHERE admission_date = ?", (yesterday,))
-    today_new = cursor.fetchone()[0]
-    
-    conn.close()
-    
-    return {"today_new": today_new}
-
-@router.get("/stats/overall/lastmonth")
-def get_overall_stats_lastmonth(current_user: User = Depends(get_current_user_required)):
-    """获取上月总体统计（用于同比）"""
-    if current_user.role != Role.ADMIN:
-        raise HTTPException(status_code=403, detail="无权限")
-    
-    import sqlite3
-    import os
-    from datetime import datetime, timedelta
-    
-    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
-    
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    today = datetime.now()
-    first_day_this_month = today.replace(day=1)
-    last_day_last_month = first_day_this_month - timedelta(days=1)
-    first_day_last_month = last_day_last_month.replace(day=1)
-    
-    start = first_day_last_month.strftime("%Y-%m-%d")
-    end = last_day_last_month.strftime("%Y-%m-%d")
-    
-    # 上月总病历数
-    cursor.execute("SELECT COUNT(*) FROM records WHERE admission_date <= ?", (end,))
-    total_records = cursor.fetchone()[0]
-    
-    # 上月医生总数
-    cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'doctor'")
-    doctor_count = cursor.fetchone()[0]
-    
-    # 上月新增病历数
-    cursor.execute("SELECT COUNT(*) FROM records WHERE admission_date BETWEEN ? AND ?", (start, end))
-    month_new = cursor.fetchone()[0]
-    
-    conn.close()
-    
-    return {
-        "total_records": total_records,
-        "doctor_count": doctor_count,
-        "month_new": month_new,
-        "today_new": 0
-    }
-
-
-@router.get("/stats/overall/yesterday")
-def get_overall_stats_yesterday(current_user: User = Depends(get_current_user_required)):
-    """获取昨日总体统计（用于今日对比）"""
-    if current_user.role != Role.ADMIN:
-        raise HTTPException(status_code=403, detail="无权限")
-    
-    import sqlite3
-    import os
-    from datetime import datetime, timedelta
-    
-    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
-    
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-    
-    cursor.execute("SELECT COUNT(*) FROM records WHERE admission_date = ?", (yesterday,))
-    today_new = cursor.fetchone()[0]
-    
-    conn.close()
-    
-    return {"today_new": today_new}
-
-
+# ============ 各科室医生数量分布 ============
 @router.get("/stats/doctor/distribution")
 def get_doctor_distribution(current_user: User = Depends(get_current_user_required)):
     """获取各科室医生数量分布"""
@@ -1491,17 +1414,15 @@ def get_doctor_distribution(current_user: User = Depends(get_current_user_requir
     
     return [{"department": row[0], "count": row[1]} for row in results]
 
-
+# ============ 医生工作量排行(完整数据) ============
 @router.get("/stats/doctor/workload")
 def get_doctor_workload(
     current_user: User = Depends(get_current_user_required),
     start_date: str = None,
-    end_date: str = None
+    end_date: str = None,
+    department: str = None,
+    limit: int = 1000
 ):
-    """获取医生接诊量排行（可筛选时间段）"""
-    if current_user.role != Role.ADMIN:
-        raise HTTPException(status_code=403, detail="无权限")
-    
     import sqlite3
     import os
     from datetime import datetime, timedelta
@@ -1512,28 +1433,47 @@ def get_doctor_workload(
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # 默认最近30天
-    if not start_date or not end_date:
-        end = datetime.now()
-        start = end - timedelta(days=30)
-        start_date = start.strftime("%Y-%m-%d")
-        end_date = end.strftime("%Y-%m-%d")
+    # 构建查询
+    if start_date and end_date:
+        # 有时间范围
+        query = """
+            SELECT doctor_name, doctor_id, department, COUNT(*) as count
+            FROM records 
+            WHERE admission_date BETWEEN ? AND ?
+        """
+        params = [start_date, end_date]
+    else:
+        # 无时间范围，统计全部
+        query = """
+            SELECT doctor_name, doctor_id, department, COUNT(*) as count
+            FROM records 
+        """
+        params = []
     
-    cursor.execute("""
-        SELECT doctor_name, COUNT(*) as count 
-        FROM records 
-        WHERE admission_date BETWEEN ? AND ?
-        GROUP BY doctor_name
-        ORDER BY count DESC
-        LIMIT 10
-    """, (start_date, end_date))
+    # 科室筛选
+    if department:
+        query += " AND department = ?" if start_date and end_date else " WHERE department = ?"
+        params.append(department)
     
+    # 分组和排序
+    query += " GROUP BY doctor_name, doctor_id, department ORDER BY count DESC LIMIT ?"
+    params.append(limit)
+    
+    cursor.execute(query, params)
     results = cursor.fetchall()
     conn.close()
     
-    return [{"name": row[0], "count": row[1]} for row in results]
+    return [
+        {
+            "name": row[0],
+            "id": row[1],
+            "department": row[2],
+            "count": row[3]
+        }
+        for row in results
+    ]
 
-
+# ============ 科室同比变化 ============
 @router.get("/stats/department/yoy")
 def get_department_yoy(
     current_user: User = Depends(get_current_user_required),
@@ -1603,6 +1543,7 @@ def get_department_yoy(
         "growth": growth
     }
 
+# ============ 单个医生接诊趋势 ============
 @router.get("/stats/doctor/trend")
 def get_doctor_trend(
     current_user: User = Depends(get_current_user_required),
