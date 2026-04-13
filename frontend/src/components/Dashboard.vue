@@ -1,12 +1,11 @@
 <template>
   <el-container class="dashboard-container">
-    <!-- 左侧侧边栏（深色） -->
     <el-aside width="260px" class="sidebar">
       <div class="sidebar-header">
         <h2>🏥 仁爱医院</h2>
         <p>病历管理系统</p>
       </div>
-      
+
       <el-menu
         :default-active="activeMenu"
         class="sidebar-menu"
@@ -15,31 +14,45 @@
         active-text-color="#ffffff"
         @select="handleMenuSelect"
       >
-        <!-- 仪表盘（所有用户都有） -->
-        <el-menu-item index="dashboard">
-          <el-icon><DataBoard /></el-icon>
-          <span>仪表盘</span>
-        </el-menu-item>
-        
-        <!-- 病历管理（所有用户都有） -->
-        <el-menu-item index="records">
-          <el-icon><Document /></el-icon>
-          <span>病历管理</span>
+        <!-- ========== 运营看板 ========== -->
+        <el-sub-menu index="dashboard-group">
+          <template #title>
+            <el-icon><DataBoard /></el-icon>
+            <span>运营看板</span>
+          </template>
+          <el-menu-item index="dashboard">实时监控</el-menu-item>
+          <el-menu-item index="dashboard-profile" v-if="userInfo.role === 'doctor'">个人中心</el-menu-item>
+          <el-menu-item index="dashboard-dept" v-if="userInfo.role === 'admin'">科室运营</el-menu-item>
+          <el-menu-item index="dashboard-trend" v-if="userInfo.role === 'admin'">趋势分析</el-menu-item>
+        </el-sub-menu>
+
+        <!-- ========== 病历管理 ========== -->
+        <el-sub-menu index="records-group">
+          <template #title>
+            <el-icon><Document /></el-icon>
+            <span>病历管理</span>
+          </template>
+          <el-menu-item index="records">病历检索</el-menu-item>
+          <el-menu-item index="records-stats">病历统计</el-menu-item>
+        </el-sub-menu>
+
+        <!-- ========== AI问诊（仅医生） ========== -->
+        <el-menu-item index="ai-assistant" v-if="userInfo.role === 'doctor'">
+          <el-icon><Service /></el-icon>
+          <span>AI问诊</span>
         </el-menu-item>
 
-<!-- AI问诊（仅医生） -->
-<el-menu-item index="ai-assistant" v-if="userInfo.role === 'doctor'">
-  <el-icon><Service /></el-icon>
-  <span>AI问诊</span>
-</el-menu-item>
-        
-        <!-- 医生管理（仅管理员） -->
-        <el-menu-item index="doctors" v-if="userInfo.role === 'admin'">
-          <el-icon><UserFilled /></el-icon>
-          <span>医生管理</span>
-        </el-menu-item>
+        <!-- ========== 医生管理（仅管理员） ========== -->
+        <el-sub-menu index="doctors-group" v-if="userInfo.role === 'admin'">
+          <template #title>
+            <el-icon><UserFilled /></el-icon>
+            <span>医生管理</span>
+          </template>
+          <el-menu-item index="doctors">医生列表</el-menu-item>
+          <el-menu-item index="doctors-workload">医生绩效</el-menu-item>
+        </el-sub-menu>
       </el-menu>
-      
+
       <div class="sidebar-footer">
         <el-avatar :size="40" :icon="UserFilled" style="background-color: #2563eb;" />
         <div class="user-info">
@@ -53,14 +66,11 @@
       </div>
     </el-aside>
 
-    <!-- 右侧主内容区 -->
     <el-main class="main-content">
-      <!-- 根据角色和菜单显示不同内容 -->
       <DoctorDashboard 
         v-if="userInfo.role === 'doctor'"
         :active-tab="activeMenu"
       />
-      
       <AdminDashboard 
         v-else
         :active-tab="activeMenu"
@@ -69,12 +79,11 @@
     </el-main>
   </el-container>
 </template>
-
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { DataBoard, Document, UserFilled, Service} from '@element-plus/icons-vue'
+import { DataBoard, Document, UserFilled, Service } from '@element-plus/icons-vue'
 import DoctorDashboard from './DoctorDashboard.vue'
 import AdminDashboard from './AdminDashboard.vue'
 import axios from 'axios'
@@ -101,7 +110,6 @@ const handleLogout = () => {
   }).catch(() => {})
 }
 </script>
-
 <style scoped>
 .dashboard-container {
   height: 100vh;

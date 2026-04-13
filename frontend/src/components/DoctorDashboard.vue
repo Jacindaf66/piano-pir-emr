@@ -1,209 +1,312 @@
 <template>
   <div class="doctor-dashboard">
-    <!-- 仪表盘内容 -->
-    <template v-if="activeTab === 'dashboard'">
+    
+    <!-- ========== 运营看板（所有子视图） ========== -->
+    <template v-if="activeTab === 'dashboard' || activeTab === 'dashboard-profile' || activeTab === 'dashboard-dept' || activeTab === 'dashboard-trend'">
+      
+      <!-- 欢迎语（根据子视图显示不同标题） -->
       <div class="welcome-banner">
         <h2>欢迎回来，{{ userInfo.name }}医生！</h2>
+        <p v-if="activeTab === 'dashboard'">实时监控 - 今日科室运营数据</p>
+        <p v-if="activeTab === 'dashboard-profile'">个人中心 - 我的工作概况</p>
+        <p v-if="activeTab === 'dashboard-dept'">科室运营 - 本科室病历统计</p>
+        <p v-if="activeTab === 'dashboard-trend'">趋势分析 - 病历变化趋势</p>
         <p>科室：{{ userInfo.department }} | 今天是 {{ currentDate }}，祝您工作愉快！</p>
       </div>
 
+      <!-- 统计卡片（所有子视图都显示） -->
       <el-row :gutter="16" class="stats-row">
-  <el-col :span="8">
-    <el-card shadow="hover" class="stat-card">
-      <div class="stat-label">本科室病历总数</div>
-      <div class="stat-value">{{ deptStats.total || 0 }}</div>
-      <div class="stat-trend" :class="getTrendClass(deptStats.totalTrend)">
-        {{ deptStats.totalTrend > 0 ? '↑' : deptStats.totalTrend < 0 ? '↓' : '→' }} 
-        {{ Math.abs(deptStats.totalTrend || 0) }}%
-        <span class="trend-compare">较上月</span>
-      </div>
-    </el-card>
-  </el-col>
-  <el-col :span="8">
-    <el-card shadow="hover" class="stat-card">
-      <div class="stat-label">本月新增</div>
-      <div class="stat-value">{{ deptStats.month || 0 }}</div>
-      <div class="stat-trend" :class="getTrendClass(deptStats.monthTrend)">
-        {{ deptStats.monthTrend > 0 ? '↑' : deptStats.monthTrend < 0 ? '↓' : '→' }} 
-        {{ Math.abs(deptStats.monthTrend || 0) }}%
-        <span class="trend-compare">较上月</span>
-      </div>
-    </el-card>
-  </el-col>
-  <el-col :span="8">
-    <el-card shadow="hover" class="stat-card">
-      <div class="stat-label">今日新增</div>
-      <div class="stat-value">{{ deptStats.today || 0 }}</div>
-      <div class="stat-trend" :class="getTrendClass(deptStats.todayTrend)">
-        {{ deptStats.todayTrend > 0 ? '↑' : deptStats.todayTrend < 0 ? '↓' : '→' }} 
-        {{ Math.abs(deptStats.todayTrend || 0) }}%
-        <span class="trend-compare">较昨日</span>
-      </div>
-    </el-card>
-  </el-col>
-</el-row>
+        <el-col :span="8">
+          <el-card shadow="hover" class="stat-card">
+            <div class="stat-label">本科室病历总数</div>
+            <div class="stat-value">{{ deptStats.total || 0 }}</div>
+            <div class="stat-trend" :class="getTrendClass(deptStats.totalTrend)">
+              {{ deptStats.totalTrend > 0 ? '↑' : deptStats.totalTrend < 0 ? '↓' : '→' }} 
+              {{ Math.abs(deptStats.totalTrend || 0) }}%
+              <span class="trend-compare">较上月</span>
+            </div>
+          </el-card>
+        </el-col>
+        <el-col :span="8">
+          <el-card shadow="hover" class="stat-card">
+            <div class="stat-label">本月新增</div>
+            <div class="stat-value">{{ deptStats.month || 0 }}</div>
+            <div class="stat-trend" :class="getTrendClass(deptStats.monthTrend)">
+              {{ deptStats.monthTrend > 0 ? '↑' : deptStats.monthTrend < 0 ? '↓' : '→' }} 
+              {{ Math.abs(deptStats.monthTrend || 0) }}%
+              <span class="trend-compare">较上月</span>
+            </div>
+          </el-card>
+        </el-col>
+        <el-col :span="8">
+          <el-card shadow="hover" class="stat-card">
+            <div class="stat-label">今日新增</div>
+            <div class="stat-value">{{ deptStats.today || 0 }}</div>
+            <div class="stat-trend" :class="getTrendClass(deptStats.todayTrend)">
+              {{ deptStats.todayTrend > 0 ? '↑' : deptStats.todayTrend < 0 ? '↓' : '→' }} 
+              {{ Math.abs(deptStats.todayTrend || 0) }}%
+              <span class="trend-compare">较昨日</span>
+            </div>
+          </el-card>
+        </el-col>
+      </el-row>
 
-      <!-- 本科室病历趋势图 -->
-<el-card shadow="hover" class="chart-card">
-  <template #header>
-    <div style="display: flex; justify-content: space-between; align-items: center;">
-      <span style="font-weight: 600;">{{ userInfo.department }}科室病历趋势</span>
-      <div>
-        <el-radio-group v-model="trendTimeUnit" size="small" @change="onTimeUnitChange">
-  <el-radio-button value="day">日</el-radio-button>
-  <el-radio-button value="week">周</el-radio-button>
-  <el-radio-button value="month">月</el-radio-button>
-  <el-radio-button value="year">年</el-radio-button>
-</el-radio-group>
-        <el-date-picker
-          v-model="trendDateRange"
-          type="daterange"
-          range-separator="至"
-          start-placeholder="开始日期"
-          end-placeholder="结束日期"
-          size="small"
-          style="width: 260px; margin-left: 12px;"
-          :clearable="false"
-          @change="onDateRangeChange"
-        />
-      </div>
-    </div>
-  </template>
-  <div ref="trendChart" class="chart" v-loading="chartLoading"></div>
-</el-card>
+      <!-- ========== 实时监控视图 ========== -->
+      <template v-if="activeTab === 'dashboard'">
+        <el-card shadow="hover" class="chart-card">
+          <template #header>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-weight: 600;">{{ userInfo.department }}科室病历趋势</span>
+              <div>
+                <el-radio-group v-model="trendTimeUnit" size="small" @change="onTimeUnitChange">
+                  <el-radio-button value="day">日</el-radio-button>
+                  <el-radio-button value="week">周</el-radio-button>
+                  <el-radio-button value="month">月</el-radio-button>
+                  <el-radio-button value="year">年</el-radio-button>
+                </el-radio-group>
+                <el-date-picker
+                  v-model="trendDateRange"
+                  type="daterange"
+                  range-separator="至"
+                  start-placeholder="开始日期"
+                  end-placeholder="结束日期"
+                  size="small"
+                  style="width: 260px; margin-left: 12px;"
+                  :clearable="false"
+                  @change="onDateRangeChange"
+                />
+              </div>
+            </div>
+          </template>
+          <div ref="trendChart" class="chart" v-loading="chartLoading"></div>
+        </el-card>
+      </template>
+
+      <!-- ========== 个人中心视图 ========== -->
+      <template v-if="activeTab === 'dashboard-profile'">
+        <el-row :gutter="16">
+          <!-- 个人信息卡片 -->
+          <el-col :span="8">
+            <el-card shadow="hover" class="profile-card">
+              <div class="profile-avatar">
+                <el-avatar :size="80" :icon="UserFilled" style="background-color: #2563eb;" />
+              </div>
+              <div class="profile-info">
+                <h3>{{ userInfo.name }}</h3>
+                <p><el-icon><User /></el-icon> 主治医师</p>
+                <p><el-icon><OfficeBuilding /></el-icon> {{ userInfo.department }}</p>
+                <p><el-icon><Message /></el-icon> 工号：{{ userInfo.username || '未设置' }}</p>
+              </div>
+            </el-card>
+          </el-col>
+
+          <!-- 个人接诊统计卡片 -->
+          <el-col :span="8">
+            <el-card shadow="hover" class="stat-card">
+              <div class="stat-label">我的总接诊量</div>
+              <div class="stat-value">{{ doctorStats.total || 0 }}</div>
+              <div class="stat-trend">
+                {{ doctorStats.totalTrend > 0 ? '↑' : doctorStats.totalTrend < 0 ? '↓' : '→' }} 
+                {{ Math.abs(doctorStats.totalTrend || 0) }}%
+                <span class="trend-compare">较上月</span>
+              </div>
+            </el-card>
+          </el-col>
+
+          <el-col :span="8">
+            <el-card shadow="hover" class="stat-card">
+              <div class="stat-label">本月接诊量</div>
+              <div class="stat-value">{{ doctorStats.month || 0 }}</div>
+              <div class="stat-trend">
+                {{ doctorStats.monthTrend > 0 ? '↑' : doctorStats.monthTrend < 0 ? '↓' : '→' }} 
+                {{ Math.abs(doctorStats.monthTrend || 0) }}%
+                <span class="trend-compare">较上月</span>
+              </div>
+            </el-card>
+          </el-col>
+        </el-row>
+
+        <!-- 个人接诊趋势图 -->
+        <el-card shadow="hover" class="chart-card" style="margin-top: 16px;">
+          <template #header>
+            <span style="font-weight: 600;">我的接诊趋势</span>
+          </template>
+          <div ref="doctorTrendChart" class="chart" v-loading="doctorTrendLoading"></div>
+        </el-card>
+
+        <!-- 我的近期接诊记录 -->
+        <el-card shadow="hover" class="table-card" style="margin-top: 16px;">
+          <template #header>
+            <span style="font-weight: 600;">我的近期接诊记录</span>
+          </template>
+          <el-table :data="doctorRecentRecords" stripe size="small" max-height="300">
+            <el-table-column prop="admission_date" label="接诊日期" width="100" />
+            <el-table-column prop="patient_name" label="患者姓名" width="100" />
+            <el-table-column prop="diagnosis" label="诊断" show-overflow-tooltip />
+            <el-table-column label="操作" width="80">
+              <template #default="{ row }">
+                <el-button type="primary" link size="small" @click="viewRecordById(row.record_id)">详情</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </template>
+
     </template>
 
-    <!-- 病历管理内容 -->
-    <template v-if="activeTab === 'records'">
-      <div class="welcome-banner-mini">
-        <h3>病历管理 - {{ userInfo.department }}科室</h3>
-      </div>
+    <!-- ========== 病历管理（所有子视图） ========== -->
+    <template v-if="activeTab === 'records' || activeTab === 'records-stats'">
+      
+      <!-- 病历检索视图 -->
+      <template v-if="activeTab === 'records'">
+        <div class="welcome-banner-mini">
+          <h3>病历管理 - {{ userInfo.department }}科室</h3>
+        </div>
 
-<div class="action-bar">
-  <el-button type="primary" @click="showCreateRecord = true">
-    <el-icon><Plus /></el-icon>
-    新建病历
-  </el-button>
-</div>
+        <div class="action-bar">
+          <el-button type="primary" @click="showCreateRecord = true">
+            <el-icon><Plus /></el-icon>
+            新建病历
+          </el-button>
+        </div>
 
-      <el-card shadow="hover" class="table-card">
-        <template #header>
-          <div class="table-header">
-            <span style="font-weight: 600;">病历列表</span>
-            <el-input 
-              v-model="searchKeyword" 
-              placeholder="搜索病历号/患者..." 
-              prefix-icon="Search" 
-              style="width: 240px" 
-              clearable
-              @input="searchRecords"
+        <el-card shadow="hover" class="table-card">
+          <template #header>
+            <div class="table-header">
+              <span style="font-weight: 600;">病历列表</span>
+              <el-input 
+                v-model="searchKeyword" 
+                placeholder="搜索病历号/患者..." 
+                prefix-icon="Search" 
+                style="width: 240px" 
+                clearable
+                @input="searchRecords"
+              />
+            </div>
+          </template>
+          <el-table :data="records" stripe v-loading="loading">
+            <el-table-column prop="record_id" label="病历号" width="150" />
+            <el-table-column prop="name" label="患者姓名" width="100" />
+            <el-table-column prop="gender" label="性别" width="60" :formatter="(r) => r.gender === 'M' ? '男' : '女'" />
+            <el-table-column prop="age" label="年龄" width="60" />
+            <el-table-column prop="admission_date" label="入院日期" width="120" />
+            <el-table-column prop="diagnosis" label="诊断" show-overflow-tooltip />
+            <el-table-column label="操作" width="100" fixed="right">
+              <template #default="{ row }">
+                <el-button type="primary" link @click.stop="viewRecord(row)">查看详情</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          
+          <div class="pagination">
+            <el-pagination
+              v-model:current-page="currentPage"
+              v-model:page-size="pageSize"
+              :total="total"
+              layout="prev, pager, next, total"
+              background
+              @current-change="loadRecords"
             />
           </div>
-        </template>
-        <el-table :data="records" stripe v-loading="loading" >
-          <el-table-column prop="record_id" label="病历号" width="150" />
-          <el-table-column prop="name" label="患者姓名" width="100" />
-          <el-table-column prop="gender" label="性别" width="60" :formatter="(r) => r.gender === 'M' ? '男' : '女'" />
-          <el-table-column prop="age" label="年龄" width="60" />
-          <el-table-column prop="admission_date" label="入院日期" width="120" />
-          <el-table-column prop="diagnosis" label="诊断" show-overflow-tooltip />
-          <el-table-column label="操作" width="100" fixed="right">
-            <template #default="{ row }">
-              <el-button type="primary" link @click.stop="viewRecord(row)">查看详情</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-        
-        <div class="pagination">
-          <el-pagination
-            v-model:current-page="currentPage"
-            v-model:page-size="pageSize"
-            :total="total"
-            layout="prev, pager, next, total"
-            background
-            @current-change="loadRecords"
-          />
+        </el-card>
+      </template>
+
+      <!-- 病历统计视图 -->
+      <template v-if="activeTab === 'records-stats'">
+        <div class="welcome-banner-mini">
+          <h3>病历统计 - 疾病排行与药品分析</h3>
         </div>
-      </el-card>
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-card shadow="hover">
+              <template #header>疾病排行榜 TOP10</template>
+              <div ref="diseaseChart" style="height: 300px;"></div>
+            </el-card>
+          </el-col>
+          <el-col :span="12">
+            <el-card shadow="hover">
+              <template #header>药品使用排行 TOP10</template>
+              <div ref="drugChart" style="height: 300px;"></div>
+            </el-card>
+          </el-col>
+        </el-row>
+      </template>
+
     </template>
-    
-<!-- AI问诊内容 -->
-<template v-if="activeTab === 'ai-assistant'">
-  <div class="welcome-banner-mini">
-    <h3>AI智能问诊助手</h3>
-    <p>基于人工智能的诊断辅助系统</p>
-  </div>
-  
-  <div class="ai-chat-container">
-    <!-- 模型切换 -->
-    <div class="ai-model-selector">
-      <el-radio-group v-model="aiModel" size="small">
-        <el-radio-button value="deepseek">DeepSeek</el-radio-button>
-        <el-radio-button value="doubao">豆包</el-radio-button>
-      </el-radio-group>
-      <el-button size="small" @click="clearChat" :disabled="aiMessages.length === 1">
-        <el-icon><Delete /></el-icon>
-        清空对话
-      </el-button>
-    </div>
-    
-    <!-- 对话消息列表 -->
-    <div class="chat-messages" ref="chatMessagesRef">
-      <div v-for="(msg, idx) in aiMessages" :key="idx" :class="['message', msg.role]">
-        <div class="message-avatar">
-          <el-avatar :size="36" :icon="msg.role === 'user' ? UserFilled : Service" />
-        </div>
-        <div class="message-content">
-          <div class="message-name">{{ msg.role === 'user' ? userInfo.name : '仁爱医助' }}</div>
-          <div class="message-text" v-html="formatMessageText(msg.content)"></div>
-          <div class="message-time">{{ msg.time }}</div>
-        </div>
+
+    <!-- ========== AI问诊 ========== -->
+    <template v-if="activeTab === 'ai-assistant'">
+      <div class="welcome-banner-mini">
+        <h3>AI智能问诊助手</h3>
+        <p>基于人工智能的诊断辅助系统</p>
       </div>
-      <div v-if="aiLoading" class="message assistant">
-        <div class="message-avatar">
-          <el-avatar :size="36" :icon="Service" />
+      
+      <div class="ai-chat-container">
+        <div class="ai-model-selector">
+          <el-radio-group v-model="aiModel" size="small">
+            <el-radio-button value="deepseek">DeepSeek</el-radio-button>
+            <el-radio-button value="doubao">豆包</el-radio-button>
+          </el-radio-group>
+          <el-button size="small" @click="clearChat" :disabled="aiMessages.length === 1">
+            <el-icon><Delete /></el-icon>
+            清空对话
+          </el-button>
         </div>
-        <div class="message-content">
-          <div class="message-name">仁爱医助</div>
-          <div class="message-text typing">
-            <span></span><span></span><span></span>
+        
+        <div class="chat-messages" ref="chatMessagesRef">
+          <div v-for="(msg, idx) in aiMessages" :key="idx" :class="['message', msg.role]">
+            <div class="message-avatar">
+              <el-avatar :size="36" :icon="msg.role === 'user' ? UserFilled : Service" />
+            </div>
+            <div class="message-content">
+              <div class="message-name">{{ msg.role === 'user' ? userInfo.name : '仁爱医助' }}</div>
+              <div class="message-text" v-html="formatMessageText(msg.content)"></div>
+              <div class="message-time">{{ msg.time }}</div>
+            </div>
+          </div>
+          <div v-if="aiLoading" class="message assistant">
+            <div class="message-avatar">
+              <el-avatar :size="36" :icon="Service" />
+            </div>
+            <div class="message-content">
+              <div class="message-name">仁爱医助</div>
+              <div class="message-text typing">
+                <span></span><span></span><span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="quick-inputs">
+          <span class="quick-label">快捷输入：</span>
+          <el-tag 
+            v-for="tag in quickTags" 
+            :key="tag"
+            size="small"
+            @click="addQuickInput(tag)"
+          >
+            {{ tag }}
+          </el-tag>
+        </div>
+        
+        <div class="chat-input">
+          <el-input
+            v-model="aiInput"
+            type="textarea"
+            :rows="3"
+            placeholder="请描述患者症状、病史、检查结果等... (Ctrl + Enter 发送)"
+            @keyup.enter.ctrl="sendMessage"
+          />
+          <div class="input-actions">
+            <span class="input-hint">💡 支持自然语言描述，AI会为您分析诊断</span>
+            <el-button type="primary" @click="sendMessage" :loading="aiLoading">
+              <el-icon><Promotion /></el-icon>
+              发送
+            </el-button>
           </div>
         </div>
       </div>
-    </div>
-    
-    <!-- 快捷输入 -->
-    <div class="quick-inputs">
-      <span class="quick-label">快捷输入：</span>
-      <el-tag 
-        v-for="tag in quickTags" 
-        :key="tag"
-        size="small"
-        @click="addQuickInput(tag)"
-      >
-        {{ tag }}
-      </el-tag>
-    </div>
-    
-    <!-- 输入框 -->
-    <div class="chat-input">
-      <el-input
-        v-model="aiInput"
-        type="textarea"
-        :rows="3"
-        placeholder="请描述患者症状、病史、检查结果等... (Ctrl + Enter 发送)"
-        @keyup.enter.ctrl="sendMessage"
-      />
-      <div class="input-actions">
-        <span class="input-hint">💡 支持自然语言描述，AI会为您分析诊断</span>
-        <el-button type="primary" @click="sendMessage" :loading="aiLoading">
-          <el-icon><Promotion /></el-icon>
-          发送
-        </el-button>
-      </div>
-    </div>
-  </div>
-</template>
+    </template>
 
     <!-- 病历详情抽屉 -->
     <el-drawer v-model="showDetail" title="病历详情" size="50%">
@@ -324,40 +427,37 @@
           <el-button type="primary" link @click="addPrescription">+ 添加药品</el-button>
         </el-form-item>
 
-        <!-- 检验结果 -->
-<el-form-item label="检验结果">
-  <div v-for="(value, key) in newRecord.lab_results" :key="key" class="lab-item">
-    <span style="width: 100px">{{ key }}：</span>
-    <el-input v-model="newRecord.lab_results[key]" placeholder="结果值" style="width: 200px" />
-    <el-button type="danger" link @click="delete newRecord.lab_results[key]">删除</el-button>
-  </div>
-  <div class="add-lab">
-    <el-input v-model="newLabKey" placeholder="项目名称" style="width: 150px" />
-    <el-input v-model="newLabValue" placeholder="结果值" style="width: 150px; margin-left: 10px" />
-    <el-button type="primary" link @click="addLabItem" style="margin-left: 10px">添加</el-button>
-  </div>
-</el-form-item>
+        <el-form-item label="检验结果">
+          <div v-for="(value, key) in newRecord.lab_results" :key="key" class="lab-item">
+            <span style="width: 100px">{{ key }}：</span>
+            <el-input v-model="newRecord.lab_results[key]" placeholder="结果值" style="width: 200px" />
+            <el-button type="danger" link @click="delete newRecord.lab_results[key]">删除</el-button>
+          </div>
+          <div class="add-lab">
+            <el-input v-model="newLabKey" placeholder="项目名称" style="width: 150px" />
+            <el-input v-model="newLabValue" placeholder="结果值" style="width: 150px; margin-left: 10px" />
+            <el-button type="primary" link @click="addLabItem" style="margin-left: 10px">添加</el-button>
+          </div>
+        </el-form-item>
 
-<!-- 影像报告（可选择或输入） -->
-<el-form-item label="影像报告">
-  <el-select 
-    v-model="newRecord.imaging_reports" 
-    placeholder="请选择或输入"
-    filterable
-    allow-create
-    default-first-option
-    style="width: 100%"
-  >
-    <el-option label="影像检查未见明显异常" value="影像检查未见明显异常" />
-    <el-option label="CT 显示轻度肺炎" value="CT 显示轻度肺炎" />
-    <el-option label="MRI 提示椎间盘突出" value="MRI 提示椎间盘突出" />
-    <el-option label="X 光提示骨折愈合良好" value="X 光提示骨折愈合良好" />
-    <el-option label="超声显示胆囊结石" value="超声显示胆囊结石" />
-    <el-option label="心电图提示心肌缺血" value="心电图提示心肌缺血" />
-  </el-select>
-</el-form-item>
+        <el-form-item label="影像报告">
+          <el-select 
+            v-model="newRecord.imaging_reports" 
+            placeholder="请选择或输入"
+            filterable
+            allow-create
+            default-first-option
+            style="width: 100%"
+          >
+            <el-option label="影像检查未见明显异常" value="影像检查未见明显异常" />
+            <el-option label="CT 显示轻度肺炎" value="CT 显示轻度肺炎" />
+            <el-option label="MRI 提示椎间盘突出" value="MRI 提示椎间盘突出" />
+            <el-option label="X 光提示骨折愈合良好" value="X 光提示骨折愈合良好" />
+            <el-option label="超声显示胆囊结石" value="超声显示胆囊结石" />
+            <el-option label="心电图提示心肌缺血" value="心电图提示心肌缺血" />
+          </el-select>
+        </el-form-item>
 
-        
         <el-form-item label="备注" prop="notes">
           <el-input v-model="newRecord.notes" type="textarea" :rows="2" placeholder="请输入备注" />
         </el-form-item>
@@ -377,7 +477,7 @@ import axios from 'axios'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { Plus, MagicStick, ChatDotRound, CopyDocument, Document } from '@element-plus/icons-vue'
-import { Service, Promotion, UserFilled, Delete } from '@element-plus/icons-vue'
+import { Service, Promotion, UserFilled, Delete, User, OfficeBuilding, Message } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 
 //AI
@@ -412,6 +512,7 @@ const quickTags = [
   '糖尿病患者，血糖空腹12.8',
   '患者乏力、消瘦1个月'
 ]
+
 
 // 添加快捷输入
 function addQuickInput(text) {
@@ -536,6 +637,22 @@ const currentDate = ref(new Date().toLocaleDateString('zh-CN', {
 // 科室统计
 const deptStats = ref({ total: 0, today: 0, month: 0 })
 
+// 医生个人统计（用于个人中心）
+const doctorStats = ref({
+  total: 0,
+  month: 0,
+  totalTrend: 0,
+  monthTrend: 0
+})
+
+// 医生接诊趋势
+const doctorTrendLoading = ref(false)
+const doctorTrendChart = ref(null)
+let doctorTrendInstance = null
+
+// 医生近期接诊记录
+const doctorRecentRecords = ref([])
+
 // 病历列表
 const records = ref([])
 const total = ref(0)
@@ -654,6 +771,98 @@ async function loadDeptStats() {
   } catch (err) {
     console.error('加载科室统计失败:', err)
   }
+}
+
+// 加载医生个人统计数据
+async function loadDoctorStats() {
+  try {
+    const today = new Date().toISOString().split('T')[0]
+    const oneMonthAgo = new Date()
+    oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1)
+    const oneMonthAgoStr = oneMonthAgo.toISOString().split('T')[0]
+    
+    // 获取该医生的所有接诊记录
+    const res = await axios.get(`${BASE_URL}/records/list`, {
+      params: {
+        doctor_name: userInfo.value.name,
+        limit: 10000
+      }
+    })
+    
+    const records = res.data.records || []
+    
+    // 总接诊量
+    const total = records.length
+    
+    // 本月接诊量
+    const monthRecords = records.filter(r => r.admission_date >= oneMonthAgoStr)
+    const month = monthRecords.length
+    
+    // 获取上月数据（用于环比）
+    const twoMonthsAgo = new Date()
+    twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2)
+    const twoMonthsAgoStr = twoMonthsAgo.toISOString().split('T')[0]
+    const lastMonthRecords = records.filter(r => r.admission_date >= twoMonthsAgoStr && r.admission_date < oneMonthAgoStr)
+    const lastMonthTotal = lastMonthRecords.length
+    
+    // 计算环比
+    const totalTrend = lastMonthTotal ? ((total - lastMonthTotal) / lastMonthTotal * 100).toFixed(1) : 0
+    const monthTrend = lastMonthTotal ? ((month - lastMonthTotal) / lastMonthTotal * 100).toFixed(1) : 0
+    
+    doctorStats.value = {
+      total: total,
+      month: month,
+      totalTrend: parseFloat(totalTrend),
+      monthTrend: parseFloat(monthTrend)
+    }
+    
+    // 近期接诊记录（最近5条）
+    doctorRecentRecords.value = records.slice(0, 5).map(r => ({
+      admission_date: r.admission_date,
+      patient_name: r.name,
+      diagnosis: r.diagnosis,
+      record_id: r.record_id
+    }))
+    
+    // 加载个人接诊趋势图
+    await nextTick()
+    if (doctorTrendChart.value) {
+      initDoctorTrendChart(records)
+    }
+    
+  } catch (err) {
+    console.error('加载医生统计数据失败:', err)
+  }
+}
+
+// 初始化个人接诊趋势图
+function initDoctorTrendChart(records) {
+  if (!doctorTrendChart.value) return
+  if (doctorTrendInstance) doctorTrendInstance.dispose()
+  
+  // 按月份统计接诊量
+  const monthMap = new Map()
+  records.forEach(r => {
+    const month = r.admission_date.substring(0, 7) // YYYY-MM
+    monthMap.set(month, (monthMap.get(month) || 0) + 1)
+  })
+  
+  const sortedMonths = Array.from(monthMap.keys()).sort()
+  const counts = sortedMonths.map(m => monthMap.get(m))
+  
+  doctorTrendInstance = echarts.init(doctorTrendChart.value)
+  doctorTrendInstance.setOption({
+    tooltip: { trigger: 'axis' },
+    xAxis: { type: 'category', data: sortedMonths },
+    yAxis: { type: 'value', name: '接诊量' },
+    series: [{
+      type: 'line',
+      data: counts,
+      smooth: true,
+      lineStyle: { color: '#2563eb', width: 3 },
+      areaStyle: { opacity: 0.2 }
+    }]
+  })
 }
 
 // 加载图表数据
@@ -927,13 +1136,30 @@ async function createRecord() {
 }
 
 // 监听标签页
-watch(() => props.activeTab, val => {
-  if (val === 'dashboard') {
-    loadDeptStats()
-    loadAllRecordsForChart()
-    loadTrendData() 
-  } else if (val === 'records') {
-    loadRecords()
+watch(() => props.activeTab, (val) => {
+  // 运营看板子视图
+  if (val === 'dashboard' || val === 'dashboard-profile') {
+    if (val === 'dashboard') {
+      loadDeptStats()
+      loadAllRecordsForChart()
+      loadTrendData()
+    }
+    if (val === 'dashboard-profile') {
+      loadDoctorStats()
+    }
+  }
+  // 病历管理子视图
+  else if (val === 'records' || val === 'records-stats') {
+    if (val === 'records') {
+      loadRecords()
+    }
+    if (val === 'records-stats') {
+      loadDeptStats()
+    }
+  }
+  // AI问诊
+  else if (val === 'ai-assistant') {
+    // 无需额外操作
   }
 })
 

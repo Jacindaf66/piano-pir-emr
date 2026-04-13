@@ -696,7 +696,7 @@ def create_record(
     # 1. 插入新病历
     record_id = f"MR-{datetime.now().strftime('%Y%m%d')}-{random.randint(10000, 99999)}"
     adm_date = datetime.strptime(req.admission_date, "%Y-%m-%d")
-    disc_date = adm_date + timedelta(days=random.randint(3, 10))
+    disc_date = adm_date + timedelta(days=random.randint(0, 10))
 
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -1102,6 +1102,66 @@ def get_piano_tables(current_user: User = Depends(get_current_user_required)):
     return {"primary_table": [], "backup_table": {}, "replacement_entries": {}, "params": {}}
 
 # ============ 科室月度统计 ============
+# @router.get("/stats/department/month")
+# def get_department_stats_month(
+#     current_user: User = Depends(get_current_user_required),
+#     department: str = None
+# ):
+#     """获取上月科室统计"""
+#     import sqlite3
+#     import os
+#     from datetime import datetime, timedelta
+    
+#     BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+#     DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+#     conn = sqlite3.connect(DB_PATH)
+#     cursor = conn.cursor()
+    
+#     # 计算上月时间范围
+#     today = datetime.now()
+#     first_day_this_month = today.replace(day=1)
+#     last_day_last_month = first_day_this_month - timedelta(days=1)
+#     first_day_last_month = last_day_last_month.replace(day=1)
+    
+#     start = first_day_last_month.strftime("%Y-%m-%d")
+#     end = last_day_last_month.strftime("%Y-%m-%d")
+    
+#     if current_user.role != Role.ADMIN and department:
+#         dept_filter = department
+#     elif current_user.role != Role.ADMIN:
+#         dept_filter = current_user.department
+#     else:
+#         dept_filter = department
+    
+#     if dept_filter:
+#         cursor.execute("""
+#             SELECT 
+#                 COUNT(*) as total,
+#                 SUM(CASE WHEN admission_date >= ? AND admission_date <= ? THEN 1 ELSE 0 END) as month_count,
+#                 SUM(CASE WHEN admission_date = ? THEN 1 ELSE 0 END) as today_count
+#             FROM records 
+#             WHERE department = ?
+#         """, (start, end, today.strftime("%Y-%m-%d"), dept_filter))
+#     else:
+#         cursor.execute("""
+#             SELECT 
+#                 COUNT(*) as total,
+#                 SUM(CASE WHEN admission_date >= ? AND admission_date <= ? THEN 1 ELSE 0 END) as month_count,
+#                 SUM(CASE WHEN admission_date = ? THEN 1 ELSE 0 END) as today_count
+#             FROM records
+#         """, (start, end, today.strftime("%Y-%m-%d")))
+    
+#     row = cursor.fetchone()
+#     conn.close()
+    
+#     return {
+#         "stats": [{
+#             "total": row[0] or 0,
+#             "month": row[1] or 0,
+#             "today": row[2] or 0
+#         }]
+#     }
 @router.get("/stats/department/month")
 def get_department_stats_month(
     current_user: User = Depends(get_current_user_required),
@@ -1127,30 +1187,29 @@ def get_department_stats_month(
     start = first_day_last_month.strftime("%Y-%m-%d")
     end = last_day_last_month.strftime("%Y-%m-%d")
     
-    if current_user.role != Role.ADMIN and department:
-        dept_filter = department
-    elif current_user.role != Role.ADMIN:
+    if current_user.role != Role.ADMIN:
         dept_filter = current_user.department
     else:
         dept_filter = department
     
     if dept_filter:
+        # ⭐ 修改：total 统计上月底之前的全部病历（admission_date <= 上月底）
         cursor.execute("""
             SELECT 
-                COUNT(*) as total,
+                (SELECT COUNT(*) FROM records WHERE department = ? AND admission_date <= ?) as total,
                 SUM(CASE WHEN admission_date >= ? AND admission_date <= ? THEN 1 ELSE 0 END) as month_count,
                 SUM(CASE WHEN admission_date = ? THEN 1 ELSE 0 END) as today_count
             FROM records 
             WHERE department = ?
-        """, (start, end, today.strftime("%Y-%m-%d"), dept_filter))
+        """, (dept_filter, end, start, end, today.strftime("%Y-%m-%d"), dept_filter))
     else:
         cursor.execute("""
             SELECT 
-                COUNT(*) as total,
+                (SELECT COUNT(*) FROM records WHERE admission_date <= ?) as total,
                 SUM(CASE WHEN admission_date >= ? AND admission_date <= ? THEN 1 ELSE 0 END) as month_count,
                 SUM(CASE WHEN admission_date = ? THEN 1 ELSE 0 END) as today_count
             FROM records
-        """, (start, end, today.strftime("%Y-%m-%d")))
+        """, (end, start, end, today.strftime("%Y-%m-%d")))
     
     row = cursor.fetchone()
     conn.close()
@@ -1164,48 +1223,46 @@ def get_department_stats_month(
     }
 
 # ============ 科室昨日统计 ============
-# @router.get("/stats/department/yesterday")
-# def get_department_stats_yesterday(
-#     current_user: User = Depends(get_current_user_required),
-#     department: str = None
-# ):
-#     """获取昨日科室统计"""
-#     import sqlite3
-#     import os
-#     from datetime import datetime, timedelta
+@router.get("/stats/department/yesterday")
+def get_department_stats_yesterday(
+    current_user: User = Depends(get_current_user_required),
+    department: str = None
+):
+    """获取昨日科室统计"""
+    import sqlite3
+    import os
+    from datetime import datetime, timedelta
     
-#     BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-#     DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
     
-#     conn = sqlite3.connect(DB_PATH)
-#     cursor = conn.cursor()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
     
-#     yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     
-#     if current_user.role != Role.ADMIN and department:
-#         dept_filter = department
-#     elif current_user.role != Role.ADMIN:
-#         dept_filter = current_user.department
-#     else:
-#         dept_filter = department
+    # 权限控制
+    if current_user.role != Role.ADMIN:
+        dept_filter = current_user.department
+    else:
+        dept_filter = department
     
-#     if dept_filter:
-#         cursor.execute("""
-#             SELECT COUNT(*) FROM records 
-#             WHERE department = ? AND admission_date = ?
-#         """, (dept_filter, yesterday))
-#     else:
-#         cursor.execute("""
-#             SELECT COUNT(*) FROM records 
-#             WHERE admission_date = ?
-#         """, (yesterday,))
+    if dept_filter:
+        cursor.execute("""
+            SELECT COUNT(*) FROM records 
+            WHERE department = ? AND admission_date = ?
+        """, (dept_filter, yesterday))
+    else:
+        cursor.execute("""
+            SELECT COUNT(*) FROM records 
+            WHERE admission_date = ?
+        """, (yesterday,))
     
-#     count = cursor.fetchone()[0] or 0
-#     conn.close()
+    count = cursor.fetchone()[0] or 0
+    conn.close()
     
-#     return {
-#         "stats": [{"today": count}]
-#     }
+    return {"stats": [{"today": count}]}
+
 
 # ============ 上月总体统计 ============
 @router.get("/stats/overall/lastmonth")
