@@ -1690,3 +1690,144 @@ def ai_chat(
     else:
         raise HTTPException(status_code=500, detail="AI服务调用失败，请稍后重试")
  
+
+# ============ 医生科室排名 ============
+@router.get("/stats/doctor/rank")
+def get_doctor_rank(
+    current_user: User = Depends(get_current_user_required),
+    doctor_name: str = None
+):
+    """获取医生在全院同科室中的接诊量排名"""
+    import sqlite3
+    import os
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # 如果没有指定医生名称，使用当前登录用户
+    if not doctor_name:
+        doctor_name = current_user.name
+    
+    # 获取该医生的科室
+    cursor.execute("""
+        SELECT department FROM users 
+        WHERE name = ? AND role = 'DOCTOR'
+    """, (doctor_name,))
+    dept_row = cursor.fetchone()
+    
+    if not dept_row:
+        conn.close()
+        return {"rank": 0, "total": 0}
+    
+    department = dept_row[0]
+    
+    # 统计该科室所有医生的接诊量
+    cursor.execute("""
+        SELECT doctor_name, COUNT(*) as count
+        FROM records
+        WHERE department = ?
+        GROUP BY doctor_name
+        ORDER BY count DESC
+    """, (department,))
+    
+    results = cursor.fetchall()
+    conn.close()
+    
+    # 计算排名
+    rank = 0
+    total = len(results)
+    
+    for i, row in enumerate(results):
+        if row[0] == doctor_name:
+            rank = i + 1
+            break
+    
+    return {
+        "rank": rank,
+        "total": total,
+        "department": department
+    }
+
+
+# ============ 获取个人资料 ============
+@router.get("/user/profile")
+def get_user_profile(
+    current_user: User = Depends(get_current_user_required)
+):
+    """获取当前登录用户的个人资料"""
+    import sqlite3
+    import os
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT name, department, gender, birth_date, title, phone, email, join_date, bio, avatar
+        FROM users 
+        WHERE username = ?
+    """, (current_user.username,))
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        return {
+            "name": row[0],
+            "department": row[1],
+            "gender": row[2] or '男',
+            "birth_date": row[3],
+            "title": row[4] or '主治医师',
+            "phone": row[5] or '',
+            "email": row[6] or '',
+            "join_date": row[7],
+            "bio": row[8] or '',
+            "avatar": row[9] or ''
+        }
+    return {"error": "用户不存在"}
+
+
+# ============ 更新个人资料 ============
+@router.post("/user/profile")
+def update_user_profile(
+    profile: dict,
+    current_user: User = Depends(get_current_user_required)
+):
+    """更新当前登录用户的个人资料"""
+    import sqlite3
+    import os
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        UPDATE users 
+        SET gender = ?, birth_date = ?, title = ?, phone = ?, 
+            email = ?, join_date = ?, bio = ?, avatar = ?
+        WHERE username = ?
+    """, (
+        profile.get('gender', '男'),
+        profile.get('birth_date'),
+        profile.get('title', '主治医师'),
+        profile.get('phone', ''),
+        profile.get('email', ''),
+        profile.get('join_date'),
+        profile.get('bio', ''),
+        profile.get('avatar', ''),
+        current_user.username
+    ))
+    
+    conn.commit()
+    conn.close()
+    
+    return {"success": True, "message": "资料更新成功"}
+
+#

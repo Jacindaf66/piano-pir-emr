@@ -82,75 +82,241 @@
         </el-card>
       </template>
 
-      <!-- ========== 个人中心视图 ========== -->
-      <template v-if="activeTab === 'dashboard-profile'">
-        <el-row :gutter="16">
-          <!-- 个人信息卡片 -->
-          <el-col :span="8">
-            <el-card shadow="hover" class="profile-card">
-              <div class="profile-avatar">
-                <el-avatar :size="80" :icon="UserFilled" style="background-color: #2563eb;" />
-              </div>
-              <div class="profile-info">
-                <h3>{{ userInfo.name }}</h3>
-                <p><el-icon><User /></el-icon> 主治医师</p>
-                <p><el-icon><OfficeBuilding /></el-icon> {{ userInfo.department }}</p>
-                <p><el-icon><Message /></el-icon> 工号：{{ userInfo.username || '未设置' }}</p>
-              </div>
-            </el-card>
-          </el-col>
+<!-- ========== 个人中心视图 ========== -->
+<template v-if="activeTab === 'dashboard-profile'">
+  
+<!-- 顶部个人信息卡片 -->
+<div class="profile-card-simple">
+  <div class="profile-left">
+    <!-- 头像：仅显示，不可点击 -->
+    <div class="profile-avatar">
+<el-avatar 
+  :size="80" 
+  :src="userAvatar" 
+  class="profile-avatar-img"
+  :style="{ backgroundColor: userAvatar ? 'transparent' : avatarColor }"
+>
+  <el-icon :size="40"><UserFilled /></el-icon>
+</el-avatar>
+    </div>
+    <div class="profile-info">
+      <h3>{{ profileForm.name || userInfo.name }}</h3>
+      <div class="profile-meta">
+        <span class="meta-item">🏥 {{ profileForm.department || userInfo.department }}</span>
+        <span class="meta-item">{{ profileForm.title || '主治医师' }}</span>
+        <span class="meta-item">📅 入职 {{ (profileForm.join_date || '2024-01-01').split('-')[0] }}年</span>
+      </div>
+    </div>
+  </div>
+  <div class="profile-right">
+    <div class="welcome-text">
+      <span class="greeting">{{ greetingText }}</span>
+      <span class="emoji">😊</span>
+    </div>
+    <div class="date-text">{{ currentDate }}</div>
+    <el-button type="primary" link size="small" class="profile-edit-btn" @click="showProfileEdit = true">
+      <el-icon><Edit /></el-icon>
+      个人资料
+    </el-button>
+  </div>
+</div>
 
-          <!-- 个人接诊统计卡片 -->
-          <el-col :span="8">
-            <el-card shadow="hover" class="stat-card">
-              <div class="stat-label">我的总接诊量</div>
-              <div class="stat-value">{{ doctorStats.total || 0 }}</div>
-              <div class="stat-trend">
-                {{ doctorStats.totalTrend > 0 ? '↑' : doctorStats.totalTrend < 0 ? '↓' : '→' }} 
-                {{ Math.abs(doctorStats.totalTrend || 0) }}%
-                <span class="trend-compare">较上月</span>
-              </div>
-            </el-card>
-          </el-col>
+  <!-- 统计卡片区域（4个卡片） -->
+  <el-row :gutter="20" class="stats-cards">
+    <!-- 卡片1：总接诊量 -->
+    <el-col :xs="24" :sm="12" :md="6">
+      <div class="stat-card-item">
+        <div class="stat-icon total-icon">
+          <el-icon><Document /></el-icon>
+        </div>
+        <div class="stat-content">
+          <div class="stat-value">{{ doctorStats.total || 0 }}</div>
+          <div class="stat-label">总接诊量</div>
+          <div class="stat-trend" :class="doctorStats.totalTrend > 0 ? 'trend-up' : doctorStats.totalTrend < 0 ? 'trend-down' : 'trend-zero'">
+            {{ doctorStats.totalTrend > 0 ? '↑' : doctorStats.totalTrend < 0 ? '↓' : '→' }}
+            {{ Math.abs(doctorStats.totalTrend) }}% 较上月
+          </div>
+        </div>
+      </div>
+    </el-col>
 
-          <el-col :span="8">
-            <el-card shadow="hover" class="stat-card">
-              <div class="stat-label">本月接诊量</div>
-              <div class="stat-value">{{ doctorStats.month || 0 }}</div>
-              <div class="stat-trend">
-                {{ doctorStats.monthTrend > 0 ? '↑' : doctorStats.monthTrend < 0 ? '↓' : '→' }} 
-                {{ Math.abs(doctorStats.monthTrend || 0) }}%
-                <span class="trend-compare">较上月</span>
-              </div>
-            </el-card>
-          </el-col>
-        </el-row>
+    <!-- 卡片2：本月接诊 -->
+    <el-col :xs="24" :sm="12" :md="6">
+      <div class="stat-card-item">
+        <div class="stat-icon month-icon">
+          <el-icon><Calendar /></el-icon>
+        </div>
+        <div class="stat-content">
+          <div class="stat-value">{{ doctorStats.month || 0 }}</div>
+          <div class="stat-label">本月接诊</div>
+          <div class="stat-trend" :class="doctorStats.monthTrend > 0 ? 'trend-up' : doctorStats.monthTrend < 0 ? 'trend-down' : 'trend-zero'">
+            {{ doctorStats.monthTrend > 0 ? '↑' : doctorStats.monthTrend < 0 ? '↓' : '→' }}
+            {{ Math.abs(doctorStats.monthTrend) }}% 较上月
+          </div>
+        </div>
+      </div>
+    </el-col>
 
-        <!-- 个人接诊趋势图 -->
-        <el-card shadow="hover" class="chart-card" style="margin-top: 16px;">
-          <template #header>
-            <span style="font-weight: 600;">我的接诊趋势</span>
-          </template>
-          <div ref="doctorTrendChart" class="chart" v-loading="doctorTrendLoading"></div>
-        </el-card>
+    <!-- 卡片3：今日接诊 -->
+    <el-col :xs="24" :sm="12" :md="6">
+      <div class="stat-card-item">
+        <div class="stat-icon today-icon">
+          <el-icon><Sunrise /></el-icon>
+        </div>
+        <div class="stat-content">
+          <div class="stat-value">{{ deptStats.today || 0 }}</div>
+          <div class="stat-label">今日接诊</div>
+          <div class="stat-trend" :class="deptStats.todayTrend > 0 ? 'trend-up' : deptStats.todayTrend < 0 ? 'trend-down' : 'trend-zero'">
+            {{ deptStats.todayTrend > 0 ? '↑' : deptStats.todayTrend < 0 ? '↓' : '→' }}
+            {{ Math.abs(deptStats.todayTrend) }}% 较昨日
+          </div>
+        </div>
+      </div>
+    </el-col>
 
-        <!-- 我的近期接诊记录 -->
-        <el-card shadow="hover" class="table-card" style="margin-top: 16px;">
-          <template #header>
-            <span style="font-weight: 600;">我的近期接诊记录</span>
-          </template>
-          <el-table :data="doctorRecentRecords" stripe size="small" max-height="300">
-            <el-table-column prop="admission_date" label="接诊日期" width="100" />
-            <el-table-column prop="patient_name" label="患者姓名" width="100" />
-            <el-table-column prop="diagnosis" label="诊断" show-overflow-tooltip />
-            <el-table-column label="操作" width="80">
-              <template #default="{ row }">
-                <el-button type="primary" link size="small" @click="viewRecordById(row.record_id)">详情</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-card>
-      </template>
+    <!-- 卡片4：科室排名 -->
+    <el-col :xs="24" :sm="12" :md="6">
+      <div class="stat-card-item">
+        <div class="stat-icon rank-icon">
+          <el-icon><Trophy /></el-icon>
+        </div>
+        <div class="stat-content">
+          <div class="stat-value">{{ doctorRank.rank || '-' }}</div>
+          <div class="stat-label">科室排名</div>
+          <div class="stat-rank-detail">全院第 {{ doctorRank.rank || '-' }} 名 / 共 {{ doctorRank.total || '-' }} 人</div>
+        </div>
+      </div>
+    </el-col>
+  </el-row>
+
+  <!-- 图表和记录双栏布局 -->
+  <el-row :gutter="20">
+    <!-- 左侧：接诊趋势图 -->
+    <el-col :xs="24" :lg="14">
+      <div class="chart-card-wrapper">
+        <div class="card-header">
+          <div class="header-title">
+            <el-icon><TrendCharts /></el-icon>
+            <span>接诊趋势</span>
+          </div>
+          <div class="header-subtitle">近12个月接诊量变化</div>
+        </div>
+        <div class="chart-container">
+          <div ref="doctorTrendChart" class="trend-chart" v-loading="doctorTrendLoading"></div>
+        </div>
+      </div>
+    </el-col>
+
+    <!-- 右侧：近期接诊记录 -->
+    <el-col :xs="24" :lg="10">
+      <div class="records-card-wrapper">
+        <div class="card-header">
+          <div class="header-title">
+            <el-icon><List /></el-icon>
+            <span>近期接诊记录</span>
+          </div>
+          <el-button type="primary" link size="small" @click="goToRecords">
+            查看全部 <el-icon><ArrowRight /></el-icon>
+          </el-button>
+        </div>
+        <div class="records-list" v-if="doctorRecentRecords.length > 0">
+          <div v-for="(record, idx) in doctorRecentRecords" :key="idx" class="record-item" @click="viewRecordById(record.record_id)">
+            <div class="record-date">
+              <div class="date-day">{{ record.admission_date?.split('-')[2] || '--' }}</div>
+              <div class="date-month">{{ record.admission_date?.substring(5) || '--' }}</div>
+            </div>
+            <div class="record-info">
+              <div class="record-name">{{ record.patient_name }}</div>
+              <div class="record-diagnosis">{{ record.diagnosis || '暂无诊断' }}</div>
+            </div>
+            <div class="record-arrow">
+              <el-icon><ArrowRight /></el-icon>
+            </div>
+          </div>
+        </div>
+        <div v-else class="empty-records">
+          <el-empty description="暂无接诊记录" :image-size="100" />
+        </div>
+      </div>
+    </el-col>
+  </el-row>
+
+  <!-- 个人资料编辑对话框 -->
+  <el-dialog v-model="showProfileEdit" title="编辑个人资料" width="500px" :before-close="handleDialogClose">
+    <el-form :model="profileForm" label-width="80px">
+<el-form-item label="头像">
+  <div class="avatar-editor">
+    <!-- 头像预览 -->
+    <div class="avatar-preview">
+      <el-avatar :size="80" :src="userAvatar" :style="{ backgroundColor: avatarColor }">
+        <el-icon :size="40"><UserFilled /></el-icon>
+      </el-avatar>
+      <div class="preview-tip">预览</div>
+    </div>
+    
+    <!-- 颜色选择器 -->
+    <div class="color-picker-section">
+      <div class="section-title">背景颜色</div>
+      <el-color-picker 
+        v-model="avatarColor" 
+        show-alpha 
+        :predefine="predefineColors"
+        @change="onColorChange"
+      />
+      <div class="color-value">当前色值：{{ avatarColor }}</div>
+    </div>
+    
+    <!-- 上传图片 -->
+    <div class="upload-section">
+      <div class="section-title">自定义图片</div>
+      <div class="upload-buttons">
+        <el-button type="primary" @click="uploadAvatar">
+          <el-icon><Upload /></el-icon>
+          上传图片
+        </el-button>
+        <el-button @click="clearAvatarImage" :disabled="!userAvatar">
+          <el-icon><Delete /></el-icon>
+          清除图片
+        </el-button>
+      </div>
+      <div class="upload-tip">支持 JPG、PNG 格式，建议使用正方形图片</div>
+      <input type="file" ref="avatarInput" style="display: none" accept="image/jpeg,image/png" @change="handleAvatarChange" />
+    </div>
+  </div>
+</el-form-item>
+      <el-form-item label="姓名">
+        <el-input v-model="profileForm.name" disabled />
+      </el-form-item>
+      <el-form-item label="科室">
+        <el-input v-model="profileForm.department" disabled />
+      </el-form-item>
+      <el-form-item label="职称">
+        <el-select v-model="profileForm.title" placeholder="请选择职称">
+          <el-option label="住院医师" value="住院医师" />
+          <el-option label="主治医师" value="主治医师" />
+          <el-option label="副主任医师" value="副主任医师" />
+          <el-option label="主任医师" value="主任医师" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="联系电话">
+        <el-input v-model="profileForm.phone" placeholder="请输入联系电话" />
+      </el-form-item>
+      <el-form-item label="电子邮箱">
+        <el-input v-model="profileForm.email" placeholder="请输入电子邮箱" />
+      </el-form-item>
+      <el-form-item label="入职日期">
+        <el-date-picker v-model="profileForm.join_date" type="date" placeholder="选择日期" style="width: 100%" value-format="YYYY-MM-DD" />
+      </el-form-item>
+      <el-form-item label="个人简介">
+        <el-input v-model="profileForm.bio" type="textarea" :rows="3" placeholder="擅长领域、个人介绍等" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="handleCancel">取消</el-button>
+      <el-button type="primary" @click="saveProfile">保存</el-button>
+    </template>
+  </el-dialog>
+</template>
 
     </template>
 
@@ -389,7 +555,7 @@
             <el-form-item label="身份证号" prop="id_card">
               <el-input v-model="newRecord.id_card" placeholder="18位身份证号" />
             </el-form-item>
-          </el-col>
+         </el-col>
         </el-row>
         
         <el-form-item label="科室" prop="department">
@@ -412,11 +578,24 @@
           <el-input v-model="newRecord.diagnosis" type="textarea" :rows="2" placeholder="请输入诊断" />
         </el-form-item>
         
-        <el-form-item label="治疗项目">
-          <el-select v-model="newRecord.treatments" multiple placeholder="请选择" style="width: 100%">
-            <el-option v-for="item in treatmentOptions" :key="item" :label="item" :value="item" />
-          </el-select>
-        </el-form-item>
+<el-form-item label="治疗项目">
+  <el-select 
+    v-model="newRecord.treatments" 
+    multiple
+    filterable
+    allow-create
+    default-first-option
+    placeholder="请选择或输入治疗项目"
+    style="width: 100%"
+  >
+    <el-option 
+      v-for="item in treatmentOptions" 
+      :key="item" 
+      :label="item" 
+      :value="item" 
+    />
+  </el-select>
+</el-form-item>
         
         <el-form-item label="处方">
           <div v-for="(pres, idx) in newRecord.prescriptions" :key="idx" class="prescription-item">
@@ -472,12 +651,16 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick, watch, onUnmounted, reactive } from 'vue'
+import { ref, onMounted, nextTick, watch, onUnmounted, reactive, computed } from 'vue'
 import axios from 'axios'
 import * as echarts from 'echarts'
-import { ElMessage } from 'element-plus'
-import { Plus, MagicStick, ChatDotRound, CopyDocument, Document } from '@element-plus/icons-vue'
-import { Service, Promotion, UserFilled, Delete, User, OfficeBuilding, Message } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { 
+  Plus, MagicStick, ChatDotRound, CopyDocument, Document,
+  Service, Promotion, UserFilled, Delete, User, OfficeBuilding, Message,
+  Check, Calendar, Sunrise, TrendCharts, List, ArrowRight, Trophy,
+  Camera, Edit, Upload,
+} from '@element-plus/icons-vue'
 import { marked } from 'marked'
 
 //AI
@@ -486,6 +669,15 @@ marked.setOptions({
   breaks: true,  // 支持换行
   gfm: true      // GitHub Flavored Markdown
 })
+
+// 基础配置
+const BASE_URL = 'http://127.0.0.1:8000/api'
+const token = localStorage.getItem('token')
+const userInfo = ref(JSON.parse(localStorage.getItem('userInfo') || '{"name":"未知","department":"未知","role":"doctor"}'))
+
+// 请求头统一配置
+axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
+axios.defaults.baseURL = BASE_URL
 
 // AI 对话相关
 const aiLoading = ref(false)
@@ -513,6 +705,279 @@ const quickTags = [
   '患者乏力、消瘦1个月'
 ]
 
+const emit = defineEmits(['menu-change'])
+
+// 跳转到病历管理页面
+const goToRecords = () => {
+  // 触发父组件切换菜单
+  emit('menu-change', 'records')
+}
+
+// 根据病历ID查看详情
+const viewRecordById = (recordId) => {
+  const record = records.value.find(r => r.record_id === recordId)
+  if (record) {
+    viewRecord(record)
+  }
+}
+
+// 医生排名
+const doctorRank = ref({
+  rank: 0,
+  total: 0
+})
+
+// 用户头像（留空使用默认头像）
+const userAvatar = ref('')
+
+// 入职年份
+const joinYear = ref('2023')
+
+// 问候语
+const greetingText = computed(() => {
+  const hour = new Date().getHours()
+  if (hour < 6) return '凌晨好'
+  if (hour < 12) return '早上好'
+  if (hour < 14) return '中午好'
+  if (hour < 18) return '下午好'
+  if (hour < 22) return '晚上好'
+  return '夜深了'
+})
+
+// 个人资料编辑
+const showProfileEdit = ref(false)
+//头像文件上传
+const avatarInput = ref(null)
+
+// 个人资料表单
+const profileForm = ref({
+  name: userInfo.value.name || '',
+  department: userInfo.value.department || '',
+  title: '主治医师',
+  phone: '',
+  email: ''
+})
+
+// 更换头像（点击触发文件选择）
+const changeAvatar = () => {
+  avatarInput.value?.click()
+}
+
+// 保存个人资料111
+const saveProfile = async () => {
+  try {
+    let avatarValue = profileForm.value.avatar
+    // 如果有上传图片，用图片
+    if (userAvatar.value) {
+      avatarValue = userAvatar.value
+    }
+    
+    const dataToSave = {
+      title: profileForm.value.title,
+      phone: profileForm.value.phone,
+      email: profileForm.value.email,
+      join_date: profileForm.value.join_date,
+      bio: profileForm.value.bio,
+      avatar: avatarValue
+    }
+    
+    await axios.post(`${BASE_URL}/user/profile`, dataToSave)
+    ElMessage.success('个人资料更新成功')
+    showProfileEdit.value = false
+    await loadUserProfile()
+  } catch (err) {
+    console.error('保存失败:', err)
+    ElMessage.error('保存失败，请重试')
+  }
+}
+
+// 加载个人资料111
+const loadUserProfile = async () => {
+  try {
+    const res = await axios.get(`${BASE_URL}/user/profile`)
+    console.log('加载个人资料:', res.data)
+    
+    profileForm.value = {
+      name: res.data.name || userInfo.value.name,
+      department: res.data.department || userInfo.value.department,
+      gender: res.data.gender || '男',
+      birth_date: res.data.birth_date || '',
+      title: res.data.title || '主治医师',
+      phone: res.data.phone || '',
+      email: res.data.email || '',
+      join_date: res.data.join_date || '',
+      bio: res.data.bio || '',
+      avatar: res.data.avatar || ''
+    }
+    
+    // ⭐ 关键：同步主界面的头像颜色和图片
+    if (res.data.avatar) {
+      if (res.data.avatar.startsWith('data:image') || res.data.avatar.startsWith('http')) {
+        userAvatar.value = res.data.avatar
+        avatarColor.value = '#3b82f6'
+      } else {
+        // 颜色格式
+        avatarColor.value = res.data.avatar
+        userAvatar.value = ''
+      }
+    } else {
+      avatarColor.value = '#3b82f6'
+      userAvatar.value = ''
+    }
+    
+    // console.log('主界面头像颜色:', avatarColor.value)
+    // console.log('主界面头像图片:', userAvatar.value)
+    
+    if (res.data.join_date) {
+      joinYear.value = res.data.join_date.split('-')[0]
+    }
+  } catch (err) {
+    console.error('加载个人资料失败:', err)
+  }
+}
+
+// 预定义颜色
+const predefineColors = ref([
+  '#3b82f6', '#10b981', '#f59e0b', '#ef4444',
+  '#8b5cf6', '#ec489a', '#06b6d4', '#84cc16',
+  '#f97316', '#14b8a6', '#6366f1', '#a855f7'
+])
+
+// 头像颜色
+const avatarColor = ref('#3b82f6')
+
+// 颜色变化
+const onColorChange = (color) => {
+  userAvatar.value = ''
+  avatarColor.value = color
+  profileForm.value.avatar = color
+  console.log('颜色已更改:', color)
+}
+
+// 清除图片
+const clearAvatarImage = () => {
+  userAvatar.value = ''
+  profileForm.value.avatar = avatarColor.value
+  ElMessage.info('已清除自定义图片')
+}
+
+// 上传头像
+const uploadAvatar = () => {
+  avatarInput.value?.click()
+}
+
+// 处理图片上传
+const handleAvatarChange = (event) => {
+  const file = event.target.files[0]
+  if (!file) return
+  
+  // 验证文件类型
+  if (!file.type.includes('image')) {
+    ElMessage.error('请选择图片文件')
+    return
+  }
+  
+  // 验证文件大小（限制2MB）
+  if (file.size > 2 * 1024 * 1024) {
+    ElMessage.error('图片大小不能超过2MB')
+    return
+  }
+  
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    userAvatar.value = e.target.result
+    profileForm.value.avatar = e.target.result
+    ElMessage.success('图片上传成功')
+  }
+  reader.onerror = () => {
+    ElMessage.error('图片读取失败')
+  }
+  reader.readAsDataURL(file)
+  
+  // 清空input，允许重新上传同一文件
+  event.target.value = ''
+}
+
+// 监听对话框关闭
+const handleDialogClose = (done) => {
+  // 检查是否有未保存的修改
+  const hasChanges = originalProfileForm.value.title !== profileForm.value.title ||
+                     originalProfileForm.value.phone !== profileForm.value.phone ||
+                     originalProfileForm.value.email !== profileForm.value.email ||
+                     originalProfileForm.value.join_date !== profileForm.value.join_date ||
+                     originalProfileForm.value.bio !== profileForm.value.bio ||
+                     originalProfileForm.value.avatar !== profileForm.value.avatar
+  
+  if (hasChanges) {
+    ElMessageBox.confirm('您有未保存的修改，确定要关闭吗？', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    }).then(() => {
+      // 用户点击确定，关闭对话框
+      showProfileEdit.value = false
+    }).catch(() => {
+      // 用户点击取消，不关闭，恢复原数据
+      profileForm.value = JSON.parse(JSON.stringify(originalProfileForm.value))
+    })
+  } else {
+    // 没有修改，直接关闭
+    showProfileEdit.value = false
+  }
+}
+
+// 对话框关闭前的钩子（点击×或遮罩层时触发）
+const handleBeforeClose = (done) => {
+  const hasChanges = checkHasChanges()
+  if (hasChanges) {
+    ElMessageBox.confirm('您有未保存的修改，确定要关闭吗？', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    }).then(() => {
+      // 用户点确定，关闭对话框
+      done()
+    }).catch(() => {
+      // 用户点取消，不关闭
+    })
+  } else {
+    // 没有修改，直接关闭
+    done()
+  }
+}
+
+// 取消按钮点击
+const handleCancel = () => {
+  const hasChanges = checkHasChanges()
+  if (hasChanges) {
+    ElMessageBox.confirm('您有未保存的修改，确定要取消吗？', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    }).then(() => {
+      // 恢复原数据并关闭
+      profileForm.value = JSON.parse(JSON.stringify(originalProfileForm.value))
+      showProfileEdit.value = false
+    }).catch(() => {
+      // 用户点取消，什么都不做，对话框保持打开
+    })
+  } else {
+    showProfileEdit.value = false
+  }
+}
+
+// 检查是否有未保存的修改
+const checkHasChanges = () => {
+  return originalProfileForm.value.title !== profileForm.value.title ||
+         originalProfileForm.value.phone !== profileForm.value.phone ||
+         originalProfileForm.value.email !== profileForm.value.email ||
+         originalProfileForm.value.join_date !== profileForm.value.join_date ||
+         originalProfileForm.value.bio !== profileForm.value.bio ||
+         originalProfileForm.value.avatar !== profileForm.value.avatar
+}
+
+// 保存原始数据的副本
+const originalProfileForm = ref({})
 
 // 添加快捷输入
 function addQuickInput(text) {
@@ -617,14 +1082,7 @@ const props = defineProps({
   }
 })
 
-// 基础配置
-const BASE_URL = 'http://127.0.0.1:8000/api'
-const token = localStorage.getItem('token')
-const userInfo = ref(JSON.parse(localStorage.getItem('userInfo') || '{"name":"未知","department":"未知","role":"doctor"}'))
 
-// 请求头统一配置
-axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
-axios.defaults.baseURL = BASE_URL
 
 // 日期
 const currentDate = ref(new Date().toLocaleDateString('zh-CN', { 
@@ -671,7 +1129,7 @@ let pianoClient = null
 
 // 新建病历
 const departments = ref(['心内科', '呼吸内科', '神经内科', '骨科', '普外科', '消化内科', '内分泌科'])
-const treatmentOptions = ref(['一级护理', '二级护理', '三级护理', '物理治疗', '康复训练', '针灸', '推拿'])
+const treatmentOptions = ref(['一级护理', '二级护理', '三级护理', '物理治疗', '药物治疗','康复训练', '针灸', '推拿'])
 const showCreateRecord = ref(false)
 const createLoading = ref(false)
 const recordFormRef = ref(null)
@@ -776,53 +1234,52 @@ async function loadDeptStats() {
 // 加载医生个人统计数据
 async function loadDoctorStats() {
   try {
-    const today = new Date().toISOString().split('T')[0]
+    // 获取全部病历
+    const res = await axios.get(`${BASE_URL}/records/list`, {
+      params: { limit: 10000 }
+    })
+    
+    const allRecords = res.data.records || []
+    const records = allRecords.filter(r => r.doctor_name === userInfo.value.name)
+    
+    const total = records.length
+    
     const oneMonthAgo = new Date()
     oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1)
     const oneMonthAgoStr = oneMonthAgo.toISOString().split('T')[0]
-    
-    // 获取该医生的所有接诊记录
-    const res = await axios.get(`${BASE_URL}/records/list`, {
-      params: {
-        doctor_name: userInfo.value.name,
-        limit: 10000
-      }
-    })
-    
-    const records = res.data.records || []
-    
-    // 总接诊量
-    const total = records.length
-    
-    // 本月接诊量
     const monthRecords = records.filter(r => r.admission_date >= oneMonthAgoStr)
     const month = monthRecords.length
-    
-    // 获取上月数据（用于环比）
-    const twoMonthsAgo = new Date()
-    twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2)
-    const twoMonthsAgoStr = twoMonthsAgo.toISOString().split('T')[0]
-    const lastMonthRecords = records.filter(r => r.admission_date >= twoMonthsAgoStr && r.admission_date < oneMonthAgoStr)
-    const lastMonthTotal = lastMonthRecords.length
-    
-    // 计算环比
-    const totalTrend = lastMonthTotal ? ((total - lastMonthTotal) / lastMonthTotal * 100).toFixed(1) : 0
-    const monthTrend = lastMonthTotal ? ((month - lastMonthTotal) / lastMonthTotal * 100).toFixed(1) : 0
     
     doctorStats.value = {
       total: total,
       month: month,
-      totalTrend: parseFloat(totalTrend),
-      monthTrend: parseFloat(monthTrend)
+      totalTrend: 0,
+      monthTrend: 0
     }
     
-    // 近期接诊记录（最近5条）
     doctorRecentRecords.value = records.slice(0, 5).map(r => ({
       admission_date: r.admission_date,
       patient_name: r.name,
       diagnosis: r.diagnosis,
       record_id: r.record_id
     }))
+    
+    // 获取医生排名
+    try {
+      const rankRes = await axios.get(`${BASE_URL}/stats/doctor/rank`, {
+        params: { doctor_name: userInfo.value.name }
+      })
+      doctorRank.value = {
+        rank: rankRes.data.rank,
+        total: rankRes.data.total
+      }
+    } catch (err) {
+      console.error('获取医生排名失败:', err)
+      doctorRank.value = { rank: 0, total: 0 }
+    }
+    
+    // ⭐ 加载个人资料（新增）
+    await loadUserProfile()
     
     // 加载个人接诊趋势图
     await nextTick()
@@ -1135,9 +1592,9 @@ async function createRecord() {
   })
 }
 
+
 // 监听标签页
 watch(() => props.activeTab, (val) => {
-  // 运营看板子视图
   if (val === 'dashboard' || val === 'dashboard-profile') {
     if (val === 'dashboard') {
       loadDeptStats()
@@ -1146,9 +1603,9 @@ watch(() => props.activeTab, (val) => {
     }
     if (val === 'dashboard-profile') {
       loadDoctorStats()
+      loadUserProfile()
     }
   }
-  // 病历管理子视图
   else if (val === 'records' || val === 'records-stats') {
     if (val === 'records') {
       loadRecords()
@@ -1157,9 +1614,15 @@ watch(() => props.activeTab, (val) => {
       loadDeptStats()
     }
   }
-  // AI问诊
   else if (val === 'ai-assistant') {
     // 无需额外操作
+  }
+})
+
+// 监听对话框打开，保存原始数据
+watch(showProfileEdit, (val) => {
+  if (val) {
+    originalProfileForm.value = JSON.parse(JSON.stringify(profileForm.value))
   }
 })
 
@@ -1173,6 +1636,7 @@ onMounted(() => {
   initDateRange()
   loadTrendData()
   window.addEventListener('resize', resizeChart)
+  loadUserProfile()
 })
 
 onUnmounted(() => {
@@ -1643,4 +2107,443 @@ function updateChart(data) {
   border: none;
   border-top: 1px solid #e2e8f0;
 }
+/* ========== 个人中心样式 ========== */
+/* 简约个人信息卡片（带渐变边框） */
+.profile-card-simple {
+  background: white;
+  border-radius: 24px;
+  padding: 24px;
+  margin-bottom: 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 20px;
+  position: relative;
+  /* 渐变边框效果 */
+  background: linear-gradient(white, white) padding-box,
+              linear-gradient(135deg, #667eea, #764ba2, #f093fb, #4facfe) border-box;
+  border: 2px solid transparent;
+  box-shadow: 0 4px 20px rgba(102, 126, 234, 0.15);
+  transition: all 0.3s ease;
+}
+
+.profile-card-simple:hover {
+  box-shadow: 0 8px 30px rgba(102, 126, 234, 0.25);
+  transform: translateY(-2px);
+}
+
+.profile-left {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.profile-avatar-img {
+  border: 3px solid #e8f4f8;
+  transition: all 0.3s ease;
+}
+
+.profile-info h3 {
+  margin: 0 0 8px 0;
+  font-size: 22px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.profile-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.meta-item {
+  font-size: 13px;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.profile-right {
+  text-align: right;
+}
+
+.welcome-text {
+  font-size: 18px;
+  font-weight: 500;
+  color: #1e293b;
+  margin-bottom: 8px;
+}
+
+.greeting {
+  margin-right: 6px;
+}
+
+.emoji {
+  font-size: 20px;
+}
+
+.date-text {
+  font-size: 13px;
+  color: #94a3b8;
+  margin-bottom: 8px;
+}
+
+.profile-edit-btn {
+  font-size: 13px;
+  color: #3b82f6;
+}
+
+.profile-edit-btn:hover {
+  color: #2563eb;
+}
+
+/* 头像上传样式 */
+.avatar-upload {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.profile-right {
+  text-align: right;
+}
+
+.welcome-text {
+  font-size: 18px;
+  font-weight: 500;
+  color: #1e293b;
+  margin-bottom: 8px;
+}
+
+.greeting {
+  margin-right: 6px;
+}
+
+.emoji {
+  font-size: 20px;
+}
+
+.date-text {
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+/* 统计卡片 */
+.stats-cards {
+  margin-bottom: 24px;
+}
+
+.stat-card-item {
+  background: white;
+  border-radius: 16px;
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  transition: all 0.3s ease;
+  border: 1px solid #f0f0f0;
+}
+
+.stat-card-item:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+.stat-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+}
+
+.total-icon {
+  background: #eff6ff;
+  color: #3b82f6;
+}
+
+.month-icon {
+  background: #ecfdf5;
+  color: #10b981;
+}
+
+.today-icon {
+  background: #fffbeb;
+  color: #f59e0b;
+}
+
+.rank-icon {
+  background: #fef3c7;
+  color: #f59e0b;
+}
+
+.stat-content {
+  flex: 1;
+}
+
+.stat-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: #1e293b;
+  line-height: 1.2;
+}
+
+.stat-label {
+  font-size: 13px;
+  color: #64748b;
+  margin-top: 4px;
+}
+
+.stat-trend {
+  font-size: 11px;
+  margin-top: 6px;
+}
+
+.stat-rank-detail {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 4px;
+}
+
+/* 图表和记录卡片 */
+.chart-card-wrapper,
+.records-card-wrapper {
+  background: white;
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  height: 100%;
+  border: 1px solid #f0f0f0;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.header-title .el-icon {
+  font-size: 20px;
+  color: #3b82f6;
+}
+
+.header-subtitle {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.chart-container {
+  height: 320px;
+}
+
+.trend-chart {
+  width: 100%;
+  height: 100%;
+}
+
+/* 近期接诊记录列表 */
+.records-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.record-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px;
+  background: #fafbfc;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+
+.record-item:hover {
+  background: #f5f7fa;
+  border-color: #e8edf2;
+  transform: translateX(4px);
+}
+
+.record-date {
+  text-align: center;
+  min-width: 52px;
+  padding: 6px 8px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.date-day {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1e293b;
+  line-height: 1.2;
+}
+
+.date-month {
+  font-size: 10px;
+  color: #94a3b8;
+}
+
+.record-info {
+  flex: 1;
+}
+
+.record-name {
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 4px;
+}
+
+.record-diagnosis {
+  font-size: 12px;
+  color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.record-arrow {
+  color: #cbd5e1;
+  transition: all 0.2s ease;
+}
+
+.record-item:hover .record-arrow {
+  color: #3b82f6;
+  transform: translateX(4px);
+}
+
+.empty-records {
+  padding: 40px 0;
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+  .profile-card-simple {
+    flex-direction: column;
+    text-align: center;
+  }
+  
+  .profile-left {
+    flex-direction: column;
+  }
+  
+  .profile-right {
+    text-align: center;
+  }
+  
+  .profile-meta {
+    justify-content: center;
+  }
+  
+  .stat-card-item {
+    padding: 16px;
+  }
+  
+  .stat-value {
+    font-size: 22px;
+  }
+  
+  .stat-icon {
+    width: 44px;
+    height: 44px;
+    font-size: 22px;
+  }
+}
+
+.profile-edit-btn {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #3b82f6;
+}
+
+.profile-edit-btn:hover {
+  color: #2563eb;
+}
+
+/* 头像上传样式 */
+.avatar-upload {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+
+/* 头像选择器样式 */
+.avatar-selector {
+  width: 100%;
+}
+
+.default-avatar-item:hover {
+  transform: scale(1.1);
+}
+
+.avatar-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  padding: 8px 0;
+}
+
+.avatar-preview {
+  text-align: center;
+  min-width: 100px;
+}
+
+.preview-tip {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 8px;
+}
+
+.color-picker-section,
+.upload-section {
+  flex: 1;
+  min-width: 150px;
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1e293b;
+  margin-bottom: 10px;
+}
+
+.color-value {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 8px;
+}
+
+.upload-buttons {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.upload-tip {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 8px;
+}
+
 </style>
