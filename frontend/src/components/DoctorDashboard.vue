@@ -53,33 +53,61 @@
 
       <!-- ========== 实时监控视图 ========== -->
       <template v-if="activeTab === 'dashboard'">
-        <el-card shadow="hover" class="chart-card">
-          <template #header>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="font-weight: 600;">{{ userInfo.department }}科室病历趋势</span>
-              <div>
-                <el-radio-group v-model="trendTimeUnit" size="small" @change="onTimeUnitChange">
-                  <el-radio-button value="day">日</el-radio-button>
-                  <el-radio-button value="week">周</el-radio-button>
-                  <el-radio-button value="month">月</el-radio-button>
-                  <el-radio-button value="year">年</el-radio-button>
-                </el-radio-group>
-                <el-date-picker
-                  v-model="trendDateRange"
-                  type="daterange"
-                  range-separator="至"
-                  start-placeholder="开始日期"
-                  end-placeholder="结束日期"
-                  size="small"
-                  style="width: 260px; margin-left: 12px;"
-                  :clearable="false"
-                  @change="onDateRangeChange"
-                />
-              </div>
-            </div>
-          </template>
-          <div ref="trendChart" class="chart" v-loading="chartLoading"></div>
-        </el-card>
+<!-- 本科室病历趋势图 -->
+<el-card shadow="hover" class="chart-card">
+  <template #header>
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <span style="font-weight: 600;">{{ userInfo.department }}科室病历趋势</span>
+      <div>
+        <el-radio-group v-model="trendTimeUnit" size="small" @change="onTimeUnitChange">
+          <el-radio-button value="day">日</el-radio-button>
+          <el-radio-button value="week">周</el-radio-button>
+          <el-radio-button value="month">月</el-radio-button>
+          <el-radio-button value="year">年</el-radio-button>
+        </el-radio-group>
+        <el-date-picker
+          v-model="trendDateRange"
+          type="daterange"
+          range-separator="至"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+          size="small"
+          style="width: 260px; margin-left: 12px;"
+          :clearable="false"
+          @change="onDateRangeChange"
+        />
+      </div>
+    </div>
+  </template>
+  <div ref="trendChart" class="chart" v-loading="chartLoading"></div>
+  
+  <!-- ⭐ AI 智能分析卡片 -->
+  <div class="ai-analysis-card" v-if="trendAnalysisText">
+    <div class="analysis-header">
+      <div class="header-left">
+        <el-icon><MagicStick /></el-icon>
+        <span>智能分析</span>
+      </div>
+      <el-button 
+        type="primary" 
+        link 
+        size="small" 
+        @click="refreshAIAnalysis" 
+        :loading="aiAnalysisLoading"
+      >
+        <el-icon><Refresh /></el-icon>
+        刷新分析
+      </el-button>
+    </div>
+    <div class="analysis-content" v-loading="aiAnalysisLoading">
+      <div class="analysis-text">{{ trendAnalysisText }}</div>
+      <div class="analysis-tip">
+        <el-icon><InfoFilled /></el-icon>
+        <span>基于大数据分析，仅供参考</span>
+      </div>
+    </div>
+  </div>
+</el-card>
       </template>
 
 <!-- ========== 个人中心视图 ========== -->
@@ -881,7 +909,7 @@ import {
   Plus, MagicStick, ChatDotRound, CopyDocument, Document,
   Service, Promotion, UserFilled, Delete, User, OfficeBuilding, Message,
   Check, Calendar, Sunrise, TrendCharts, List, ArrowRight, Trophy,
-  Camera, Edit, Upload,
+  Camera, Edit, Upload, Refresh, InfoFilled
 } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 
@@ -2440,11 +2468,13 @@ const initDateRange = () => {
 const onTimeUnitChange = () => {
   initDateRange()
   loadTrendData()
+  getAIAnalysis()
 }
 
 // 日期范围变化
 const onDateRangeChange = () => {
   loadTrendData()
+  getAIAnalysis()
 }
 
 // 加载趋势数据
@@ -2477,6 +2507,8 @@ async function loadTrendData() {
   } finally {
     chartLoading.value = false
   }
+
+  await getAIAnalysis()
 }
 
 // 更新图表
@@ -2661,6 +2693,49 @@ function renderDrugChart(data) {
       }]
     })
   })
+}
+
+// AI 分析相关
+const trendAnalysisText = ref('')
+const aiAnalysisLoading = ref(false)
+
+// 获取 AI 趋势分析
+async function getAIAnalysis() {
+  if (!trendDateRange.value || trendDateRange.value.length !== 2) return
+  
+  aiAnalysisLoading.value = true
+  try {
+    const params = {
+      department: userInfo.value.department,
+      start_date: trendDateRange.value[0].toISOString().split('T')[0],
+      end_date: trendDateRange.value[1].toISOString().split('T')[0],
+      unit: trendTimeUnit.value
+    }
+    
+    // 获取趋势数据
+    const trendRes = await axios.get(`${BASE_URL}/stats/trend`, { params })
+    const data = trendRes.data
+    
+    // 调用 AI 分析
+    const aiRes = await axios.post(`${BASE_URL}/ai/analyze-trend`, {
+      labels: data.labels,
+      values: data.values,
+      unit: data.unit,
+      department: params.department
+    })
+    
+    trendAnalysisText.value = aiRes.data.analysis
+  } catch (err) {
+    console.error('获取AI分析失败:', err)
+    trendAnalysisText.value = 'AI分析服务暂时不可用，请稍后再试'
+  } finally {
+    aiAnalysisLoading.value = false
+  }
+}
+
+// 刷新分析
+const refreshAIAnalysis = () => {
+  getAIAnalysis()
 }
 
 // 监听标签页
@@ -3730,4 +3805,54 @@ watch(showProfileEdit, (val) => {
   margin-top: 12px;
   width: 100%;
 }
+
+/* AI 智能分析卡片 */
+.ai-analysis-card {
+  margin-top: 20px;
+  padding: 16px;
+  background: #f0f9ff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+.analysis-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.header-left .el-icon {
+  font-size: 18px;
+  color: #8b5cf6;
+}
+
+.analysis-content {
+  line-height: 1.8;
+  color: #334155;
+}
+
+.analysis-text {
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.analysis-tip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #94a3b8;
+  padding-top: 8px;
+  border-top: 1px solid #e2e8f0;
+}
+
 </style>

@@ -206,6 +206,35 @@
           </template>
           <div ref="trendChart" class="chart" v-loading="trendLoading"></div>
         </el-card>
+
+        <!-- AI 智能分析卡片 -->
+<el-card shadow="hover" class="ai-analysis-card" v-if="trendAnalysisText">
+  <template #header>
+    <div class="analysis-header">
+      <div class="header-left">
+        <el-icon><MagicStick /></el-icon>
+        <span>智能分析</span>
+      </div>
+      <el-button 
+        type="primary" 
+        link 
+        size="small" 
+        @click="refreshAIAnalysis" 
+        :loading="aiAnalysisLoading"
+      >
+        <el-icon><Refresh /></el-icon>
+        刷新分析
+      </el-button>
+    </div>
+  </template>
+  <div class="analysis-content" v-loading="aiAnalysisLoading">
+    <div class="analysis-text">{{ trendAnalysisText }}</div>
+    <div class="analysis-tip">
+      <el-icon><InfoFilled /></el-icon>
+      <span>基于大数据分析，仅供参考</span>
+    </div>
+  </div>
+</el-card>
       </template>
 
     </template>
@@ -543,6 +572,13 @@ import { ref, reactive, onMounted, nextTick, computed, watch } from 'vue'
 import axios from 'axios'
 import * as echarts from 'echarts'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { 
+  Plus, ChatDotRound, CopyDocument, Document,
+  Service, Promotion, UserFilled, Delete, User, OfficeBuilding, Message,
+  Check, Calendar, Sunrise, TrendCharts, List, ArrowRight, Trophy,
+  Camera, Edit, Upload, MagicStick, Refresh, InfoFilled, DataAnalysis
+} from '@element-plus/icons-vue'
+
 
 const props = defineProps({
   activeTab: {
@@ -1017,6 +1053,7 @@ onMounted(() => {
   loadYoYComparison()
   initAvailableYears()
   loadDoctorList()
+  getAIAnalysis()
   window.addEventListener('resize', () => {
     trendInstance?.resize()
     doctorPieInstance?.resize()
@@ -1074,11 +1111,13 @@ const initDateRange = () => {
 const onTimeUnitChange = () => {
   initDateRange()
   loadTrendData()
+  getAIAnalysis()
 }
 
 // 日期范围变化
 const onDateRangeChange = () => {
   loadTrendData()
+  getAIAnalysis()
 }
 
 // 加载趋势数据
@@ -2158,6 +2197,48 @@ watch(() => props.activeTab, (newVal) => {
   }
 })
 
+// AI 分析相关
+const trendAnalysisText = ref('')
+const aiAnalysisLoading = ref(false)
+
+// 获取 AI 趋势分析
+async function getAIAnalysis() {
+  if (!trendDateRange.value || trendDateRange.value.length !== 2) return
+  
+  aiAnalysisLoading.value = true
+  try {
+    const params = {
+      department: userInfo.value.role === 'admin' ? undefined : userInfo.value.department,
+      start_date: trendDateRange.value[0].toISOString().split('T')[0],
+      end_date: trendDateRange.value[1].toISOString().split('T')[0],
+      unit: trendTimeUnit.value
+    }
+    
+    // 获取趋势数据
+    const trendRes = await axios.get(`${BASE_URL}/stats/trend`, { params })
+    const data = trendRes.data
+    
+    // 调用 AI 分析
+    const aiRes = await axios.post(`${BASE_URL}/ai/analyze-trend`, {
+      labels: data.labels,
+      values: data.values,
+      unit: data.unit,
+      department: params.department || '全院'
+    })
+    
+    trendAnalysisText.value = aiRes.data.analysis
+  } catch (err) {
+    console.error('获取AI分析失败:', err)
+    trendAnalysisText.value = 'AI分析服务暂时不可用，请稍后再试'
+  } finally {
+    aiAnalysisLoading.value = false
+  }
+}
+
+// 刷新分析
+const refreshAIAnalysis = () => {
+  getAIAnalysis()
+}
 
 
 
@@ -2293,6 +2374,51 @@ watch(() => props.activeTab, (newVal) => {
     width: 100%;
     margin-bottom: 16px;
   }
+}
+
+.ai-analysis-card {
+  margin-top: 20px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+.analysis-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.header-left .el-icon {
+  font-size: 18px;
+  color: #8b5cf6;
+}
+
+.analysis-content {
+  line-height: 1.8;
+  color: #334155;
+}
+
+.analysis-text {
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.analysis-tip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #94a3b8;
+  padding-top: 8px;
+  border-top: 1px solid #f1f5f9;
 }
 
 </style>

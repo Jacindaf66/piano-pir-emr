@@ -40,6 +40,8 @@ router = APIRouter()
 # 加载环境变量
 load_dotenv()
 
+DOUBAO_API_KEY = os.getenv("DOUBAO_API_KEY", "")
+
 # ======================
 # 初始化 PIR 数据
 # ======================
@@ -642,128 +644,6 @@ class CreateRecordRequest(BaseModel):
     lab_results: dict = {}
     imaging_reports: str = ""
     notes: str = ""
-
-# ============ 创建新病历 ============
-# @router.post("/records/create")
-# def create_record(
-#     req: CreateRecordRequest,
-#     current_user: User = Depends(get_current_user_required),
-#     db: Session = Depends(get_db)
-# ):
-#     """创建新病历 - 同步重建 PIR 数据"""
-#     import sqlite3
-#     import json
-#     import os
-#     import random
-#     import subprocess
-#     import sys
-#     from datetime import datetime, timedelta
-#     from core.piano_preprocess import PianoPreprocess
-#     from core.piano_core import PianoServer
-
-#     BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-#     DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
-#     NPY_PATH = os.path.join(BASE_DIR, 'storage', 'db.npy')
-#     TABLE_PATH = os.path.join(BASE_DIR, 'storage', 'piano_tables.json')
-
-#     # 1. 插入新病历
-#     record_id = f"MR-{datetime.now().strftime('%Y%m%d')}-{random.randint(10000, 99999)}"
-#     adm_date = datetime.strptime(req.admission_date, "%Y-%m-%d")
-#     disc_date = adm_date + timedelta(days=random.randint(0, 10))
-
-#     conn = sqlite3.connect(DB_PATH)
-#     cursor = conn.cursor()
-#     cursor.execute(
-#         "SELECT username, name FROM users WHERE role = 'DOCTOR' AND department = ?",
-#         (req.department,)
-#     )
-#     doctors = cursor.fetchall()
-#     doctor_id, doctor_name = random.choice(doctors) if doctors else ("doc001", "张明")
-
-#     treatments_json = json.dumps(req.treatments, ensure_ascii=False)
-#     prescriptions_json = json.dumps(req.prescriptions, ensure_ascii=False)
-#     lab_results_json = json.dumps(req.lab_results, ensure_ascii=False)
-
-#     cursor.execute('''
-#         INSERT INTO records (
-#             record_id, id_card, name, gender, age,
-#             admission_date, discharge_date, diagnosis,
-#             treatments, prescriptions, lab_results,
-#             imaging_reports, doctor_id, doctor_name, department, notes
-#         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-#     ''', (
-#         record_id, req.id_card, req.name, req.gender, req.age,
-#         req.admission_date, disc_date.strftime("%Y-%m-%d"), req.diagnosis,
-#         treatments_json, prescriptions_json, lab_results_json,
-#         req.imaging_reports, doctor_id, doctor_name, req.department, req.notes
-#     ))
-#     conn.commit()
-#     cursor.execute("SELECT last_insert_rowid()")
-#     rowid = cursor.fetchone()[0]
-#     conn.close()
-
-#     # 2. 同步重建 PIR 数据（确保新病历立即可查）
-#     print("🔄 同步重建 PIR 数据...")
-    
-#     # 重建 db.npy
-#     conn = sqlite3.connect(DB_PATH)
-#     cursor = conn.cursor()
-#     cursor.execute("SELECT * FROM records ORDER BY id ASC")
-#     rows = cursor.fetchall()
-#     data_bytes = []
-#     for row in rows:
-#         record = {
-#             "id": row[0],
-#             "record_id": row[1],
-#             "id_card": row[2],
-#             "name": row[3],
-#             "gender": row[4],
-#             "age": row[5],
-#             "admission_date": row[6],
-#             "discharge_date": row[7],
-#             "diagnosis": row[8],
-#             "treatments": json.loads(row[9]),
-#             "prescriptions": json.loads(row[10]),
-#             "lab_results": json.loads(row[11]),
-#             "imaging_reports": row[12],
-#             "doctor_id": row[13],
-#             "doctor_name": row[14],
-#             "department": row[15],
-#             "notes": row[16]
-#         }
-#         raw = json.dumps(record, ensure_ascii=False).encode('utf-8')
-#         if len(raw) < 8192:
-#             raw += b'\x00' * (8192 - len(raw))
-#         else:
-#             raw = raw[:8192]
-#         data_bytes.append(np.frombuffer(raw, dtype=np.uint8))
-#     db_matrix = np.array(data_bytes)
-#     np.save(NPY_PATH, db_matrix)
-#     conn.close()
-
-#     # 重建预处理表
-#     pre = PianoPreprocess(NPY_PATH, NPY_PATH, None)
-#     pre.load_db()
-#     tables = pre.save_tables(TABLE_PATH)
-
-#     # 更新全局变量
-#     global server, piano_tables, DB_SIZE
-#     server = PianoServer([row.tobytes() for row in db_matrix])
-#     piano_tables = tables
-#     DB_SIZE = len(db_matrix)
-
-#     print(f"✅ PIR 数据重建完成，总记录数: {DB_SIZE}")
-
-#     return {
-#         "success": True,
-#         "message": "病历创建成功，PIR 数据已更新",
-#         "record_id": record_id,
-#         "index": rowid - 1,
-#         "doctor": {
-#             "id": doctor_id,
-#             "name": doctor_name
-#         }
-#     }
 
 # ============ 创建新病历 ============
 @router.post("/records/create")
@@ -2056,4 +1936,85 @@ def get_department_doctor_history(
     conn.close()
     
     return {"doctor_count": count, "month": last_day_last_month.strftime("%Y-%m")}
+
+# ============ AI 趋势分析 ==========
+@router.post("/ai/analyze-trend")
+async def analyze_trend(
+    request: Request,
+    current_user: User = Depends(get_current_user_required)
+):
+    """AI 分析病历趋势数据"""
+    import requests
+    import asyncio
+    
+    body = await request.json()
+    labels = body.get('labels', [])
+    values = body.get('values', [])
+    unit = body.get('unit', 'day')
+    department = body.get('department', '全院')
+    
+    if not labels or not values:
+        return {"analysis": "数据不足，无法分析", "success": False}
+    
+    # 计算基础统计...
+    total = sum(values)
+    avg = total / len(values)
+    max_val = max(values)
+    start_val = values[0]
+    end_val = values[-1]
+    change = ((end_val - start_val) / start_val * 100) if start_val > 0 else 0
+    
+    prompt = f"""请分析以下医院{department}的病历接诊数据趋势：
+
+数据概览：
+- 时间范围：{labels[0]} 至 {labels[-1]}（{unit}为单位）
+- 总接诊量：{total} 例
+- 日均接诊：{avg:.1f} 例
+- 最高接诊量：{max_val} 例
+- 期初接诊量：{start_val} 例
+- 期末接诊量：{end_val} 例
+- 整体变化：{change:+.1f}%
+
+请用简洁专业的语言回答（100字以内），包括：整体趋势判断、近期变化、管理建议。"""
+
+    try:
+        # 使用您已有的豆包配置
+        doubao_api_key = "91be1b79-0621-44a1-a725-a59462602582"
+        doubao_model = "doubao-seed-1-6-250615"
+        
+        # 在线程池中运行同步请求
+        def call_doubao():
+            headers = {
+                "Authorization": f"Bearer {doubao_api_key}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": doubao_model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.7,
+                "max_tokens": 500
+            }
+            response = requests.post(
+                "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=60
+            )
+            if response.status_code == 200:
+                return response.json()["choices"][0]["message"]["content"]
+            return None
+        
+        loop = asyncio.get_event_loop()
+        analysis = await loop.run_in_executor(None, call_doubao)
+        
+        if analysis:
+            return {"analysis": analysis, "success": True}
+        else:
+            return {"analysis": "AI服务暂时不可用，请稍后再试", "success": False}
+            
+    except Exception as e:
+        print(f"调用AI分析失败: {e}")
+        return {"analysis": "AI服务暂时不可用，请稍后再试", "success": False}
+
+
 #
