@@ -460,59 +460,6 @@ def get_overall_stats(current_user: User = Depends(get_current_user_required), d
     }
 
 # ============ 科室详细统计 ============
-# @router.get("/stats/department")
-# def get_department_stats_detailed(current_user: User = Depends(get_current_user_required), db: Session = Depends(get_db)):
-#     """获取科室详细统计（包含今日和本月新增）"""
-#     import sqlite3
-#     import os
-#     from datetime import datetime, timedelta
-    
-#     BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-#     DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
-    
-#     conn = sqlite3.connect(DB_PATH)
-#     cursor = conn.cursor()
-    
-#     today = datetime.now().strftime('%Y-%m-%d')
-#     month_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
-    
-#     if current_user.role == Role.ADMIN:
-#         # 管理员：统计所有科室
-#         cursor.execute("""
-#             SELECT department, COUNT(*) as total,
-#                    SUM(CASE WHEN admission_date = ? THEN 1 ELSE 0 END) as today_count,
-#                    SUM(CASE WHEN admission_date >= ? THEN 1 ELSE 0 END) as month_count
-#             FROM records 
-#             GROUP BY department
-#         """, (today, month_ago))
-#     else:
-#         # 医生：只统计自己科室
-#         cursor.execute("""
-#             SELECT department, COUNT(*) as total,
-#                    SUM(CASE WHEN admission_date = ? THEN 1 ELSE 0 END) as today_count,
-#                    SUM(CASE WHEN admission_date >= ? THEN 1 ELSE 0 END) as month_count
-#             FROM records 
-#             WHERE department = ?
-#             GROUP BY department
-#         """, (today, month_ago, current_user.department))
-    
-#     results = cursor.fetchall()
-#     conn.close()
-    
-#     stats = []
-#     for row in results:
-#         stats.append({
-#             "department": row[0],
-#             "total": row[1],
-#             "today": row[2] or 0,
-#             "month": row[3] or 0
-#         })
-    
-#     return {
-#         "stats": stats,
-#         "user_role": current_user.role.value,
-#         "user_department": current_user.department
-#     }
 @router.get("/stats/department")
 def get_department_stats_detailed(current_user: User = Depends(get_current_user_required), db: Session = Depends(get_db)):
     """获取科室详细统计（包含今日和本月新增）"""
@@ -581,26 +528,72 @@ def get_department_stats_detailed(current_user: User = Depends(get_current_user_
     }
 
 # ============ 用户列表查询（管理员） ============
+# @router.get("/users/list")
+# def get_users_list(current_user: User = Depends(get_current_user_required), db: Session = Depends(get_db)):
+#     """获取所有医生列表（仅管理员）"""
+#     if current_user.role != Role.ADMIN:
+#         raise HTTPException(status_code=403, detail="无权限")
+    
+#     users = db.query(User).filter(User.role == Role.DOCTOR).all()
+    
+#     return {
+#         "total": len(users),
+#         "users": [
+#             {
+#                 "id": u.id,
+#                 "username": u.username,
+#                 "name": u.name,
+#                 "department": u.department,
+#                 "role": u.role.value
+#             }
+#             for u in users
+#         ]
+#     }
 @router.get("/users/list")
 def get_users_list(current_user: User = Depends(get_current_user_required), db: Session = Depends(get_db)):
     """获取所有医生列表（仅管理员）"""
     if current_user.role != Role.ADMIN:
         raise HTTPException(status_code=403, detail="无权限")
     
-    users = db.query(User).filter(User.role == Role.DOCTOR).all()
+    import sqlite3
+    import os
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # 查询所有字段
+    cursor.execute("""
+        SELECT id, username, name, department, role, 
+               gender, title, phone, email, join_date, bio
+        FROM users 
+        WHERE role = 'DOCTOR'
+    """)
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    users = []
+    for row in rows:
+        users.append({
+            "id": row[0],
+            "username": row[1],
+            "name": row[2],
+            "department": row[3],
+            "role": row[4],
+            "gender": row[5] or '',
+            "title": row[6] or '主治医师',
+            "phone": row[7] or '',
+            "email": row[8] or '',
+            "join_date": row[9] or '',
+            "bio": row[10] or ''
+        })
     
     return {
         "total": len(users),
-        "users": [
-            {
-                "id": u.id,
-                "username": u.username,
-                "name": u.name,
-                "department": u.department,
-                "role": u.role.value
-            }
-            for u in users
-        ]
+        "users": users
     }
 
 # ============ 删除医生账号（管理员） ============
@@ -662,6 +655,7 @@ class CreateRecordRequest(BaseModel):
     age: int
     id_card: str
     department: str
+    doctor_id: str
     admission_date: str
     diagnosis: str
     treatments: list = []
@@ -669,6 +663,128 @@ class CreateRecordRequest(BaseModel):
     lab_results: dict = {}
     imaging_reports: str = ""
     notes: str = ""
+
+# ============ 创建新病历 ============
+# @router.post("/records/create")
+# def create_record(
+#     req: CreateRecordRequest,
+#     current_user: User = Depends(get_current_user_required),
+#     db: Session = Depends(get_db)
+# ):
+#     """创建新病历 - 同步重建 PIR 数据"""
+#     import sqlite3
+#     import json
+#     import os
+#     import random
+#     import subprocess
+#     import sys
+#     from datetime import datetime, timedelta
+#     from core.piano_preprocess import PianoPreprocess
+#     from core.piano_core import PianoServer
+
+#     BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+#     DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+#     NPY_PATH = os.path.join(BASE_DIR, 'storage', 'db.npy')
+#     TABLE_PATH = os.path.join(BASE_DIR, 'storage', 'piano_tables.json')
+
+#     # 1. 插入新病历
+#     record_id = f"MR-{datetime.now().strftime('%Y%m%d')}-{random.randint(10000, 99999)}"
+#     adm_date = datetime.strptime(req.admission_date, "%Y-%m-%d")
+#     disc_date = adm_date + timedelta(days=random.randint(0, 10))
+
+#     conn = sqlite3.connect(DB_PATH)
+#     cursor = conn.cursor()
+#     cursor.execute(
+#         "SELECT username, name FROM users WHERE role = 'DOCTOR' AND department = ?",
+#         (req.department,)
+#     )
+#     doctors = cursor.fetchall()
+#     doctor_id, doctor_name = random.choice(doctors) if doctors else ("doc001", "张明")
+
+#     treatments_json = json.dumps(req.treatments, ensure_ascii=False)
+#     prescriptions_json = json.dumps(req.prescriptions, ensure_ascii=False)
+#     lab_results_json = json.dumps(req.lab_results, ensure_ascii=False)
+
+#     cursor.execute('''
+#         INSERT INTO records (
+#             record_id, id_card, name, gender, age,
+#             admission_date, discharge_date, diagnosis,
+#             treatments, prescriptions, lab_results,
+#             imaging_reports, doctor_id, doctor_name, department, notes
+#         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+#     ''', (
+#         record_id, req.id_card, req.name, req.gender, req.age,
+#         req.admission_date, disc_date.strftime("%Y-%m-%d"), req.diagnosis,
+#         treatments_json, prescriptions_json, lab_results_json,
+#         req.imaging_reports, doctor_id, doctor_name, req.department, req.notes
+#     ))
+#     conn.commit()
+#     cursor.execute("SELECT last_insert_rowid()")
+#     rowid = cursor.fetchone()[0]
+#     conn.close()
+
+#     # 2. 同步重建 PIR 数据（确保新病历立即可查）
+#     print("🔄 同步重建 PIR 数据...")
+    
+#     # 重建 db.npy
+#     conn = sqlite3.connect(DB_PATH)
+#     cursor = conn.cursor()
+#     cursor.execute("SELECT * FROM records ORDER BY id ASC")
+#     rows = cursor.fetchall()
+#     data_bytes = []
+#     for row in rows:
+#         record = {
+#             "id": row[0],
+#             "record_id": row[1],
+#             "id_card": row[2],
+#             "name": row[3],
+#             "gender": row[4],
+#             "age": row[5],
+#             "admission_date": row[6],
+#             "discharge_date": row[7],
+#             "diagnosis": row[8],
+#             "treatments": json.loads(row[9]),
+#             "prescriptions": json.loads(row[10]),
+#             "lab_results": json.loads(row[11]),
+#             "imaging_reports": row[12],
+#             "doctor_id": row[13],
+#             "doctor_name": row[14],
+#             "department": row[15],
+#             "notes": row[16]
+#         }
+#         raw = json.dumps(record, ensure_ascii=False).encode('utf-8')
+#         if len(raw) < 8192:
+#             raw += b'\x00' * (8192 - len(raw))
+#         else:
+#             raw = raw[:8192]
+#         data_bytes.append(np.frombuffer(raw, dtype=np.uint8))
+#     db_matrix = np.array(data_bytes)
+#     np.save(NPY_PATH, db_matrix)
+#     conn.close()
+
+#     # 重建预处理表
+#     pre = PianoPreprocess(NPY_PATH, NPY_PATH, None)
+#     pre.load_db()
+#     tables = pre.save_tables(TABLE_PATH)
+
+#     # 更新全局变量
+#     global server, piano_tables, DB_SIZE
+#     server = PianoServer([row.tobytes() for row in db_matrix])
+#     piano_tables = tables
+#     DB_SIZE = len(db_matrix)
+
+#     print(f"✅ PIR 数据重建完成，总记录数: {DB_SIZE}")
+
+#     return {
+#         "success": True,
+#         "message": "病历创建成功，PIR 数据已更新",
+#         "record_id": record_id,
+#         "index": rowid - 1,
+#         "doctor": {
+#             "id": doctor_id,
+#             "name": doctor_name
+#         }
+#     }
 
 # ============ 创建新病历 ============
 @router.post("/records/create")
@@ -700,12 +816,21 @@ def create_record(
 
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT username, name FROM users WHERE role = 'DOCTOR' AND department = ?",
-        (req.department,)
-    )
-    doctors = cursor.fetchall()
-    doctor_id, doctor_name = random.choice(doctors) if doctors else ("doc001", "张明")
+    
+    # ⭐ 修改：使用前端传递的 doctor_id，不再随机选择
+    doctor_id = req.doctor_id
+    cursor.execute("SELECT name FROM users WHERE username = ?", (doctor_id,))
+    row = cursor.fetchone()
+    if row:
+        doctor_name = row[0]
+    else:
+        # 降级处理：如果找不到，按科室随机选一个
+        cursor.execute(
+            "SELECT username, name FROM users WHERE role = 'DOCTOR' AND department = ?",
+            (req.department,)
+        )
+        doctors = cursor.fetchall()
+        doctor_id, doctor_name = random.choice(doctors) if doctors else ("doc001", "张明")
 
     treatments_json = json.dumps(req.treatments, ensure_ascii=False)
     prescriptions_json = json.dumps(req.prescriptions, ensure_ascii=False)
@@ -1829,5 +1954,142 @@ def update_user_profile(
     conn.close()
     
     return {"success": True, "message": "资料更新成功"}
+
+# ============ 疾病排行榜 ============
+@router.get("/stats/disease-ranking")
+def get_disease_ranking(
+    current_user: User = Depends(get_current_user_required),
+    limit: int = 10,
+    department: str = None,  # 新增科室筛选
+    start_date: str = None,
+    end_date: str = None
+):
+    """获取疾病排行榜 TOP N"""
+    import sqlite3
+    import os
+    from datetime import datetime, timedelta
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # 权限控制：非管理员只能看自己科室
+    if current_user.role != Role.ADMIN:
+        dept_filter = current_user.department
+    else:
+        dept_filter = department
+    
+    # 构建查询条件
+    conditions = []
+    params = []
+    
+    if dept_filter:
+        conditions.append("department = ?")
+        params.append(dept_filter)
+    
+    if start_date and end_date:
+        conditions.append("admission_date BETWEEN ? AND ?")
+        params.extend([start_date, end_date])
+    
+    where_clause = ""
+    if conditions:
+        where_clause = " WHERE " + " AND ".join(conditions)
+    
+    query = f"""
+        SELECT diagnosis, COUNT(*) as count
+        FROM records
+        {where_clause}
+        GROUP BY diagnosis
+        ORDER BY count DESC
+        LIMIT ?
+    """
+    params.append(limit)
+    
+    cursor.execute(query, params)
+    results = cursor.fetchall()
+    conn.close()
+    
+    return [
+        {"name": row[0], "count": row[1]}
+        for row in results
+    ]
+
+
+# ============ 药品排行榜 ============
+@router.get("/stats/drug-ranking")
+def get_drug_ranking(
+    current_user: User = Depends(get_current_user_required),
+    limit: int = 10,
+    department: str = None,  # 新增科室筛选
+    start_date: str = None,
+    end_date: str = None
+):
+    """获取药品使用排行榜 TOP N"""
+    import sqlite3
+    import os
+    import json
+    from datetime import datetime, timedelta
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # 权限控制：非管理员只能看自己科室
+    if current_user.role != Role.ADMIN:
+        dept_filter = current_user.department
+    else:
+        dept_filter = department
+    
+    # 构建查询条件
+    conditions = []
+    params = []
+    
+    if dept_filter:
+        conditions.append("department = ?")
+        params.append(dept_filter)
+    
+    if start_date and end_date:
+        conditions.append("admission_date BETWEEN ? AND ?")
+        params.extend([start_date, end_date])
+    
+    where_clause = ""
+    if conditions:
+        where_clause = " WHERE " + " AND ".join(conditions)
+    
+    query = f"""
+        SELECT prescriptions
+        FROM records
+        {where_clause}
+    """
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    
+    # 统计药品使用次数
+    drug_count = {}
+    for row in rows:
+        try:
+            prescriptions = json.loads(row[0])
+            for p in prescriptions:
+                if isinstance(p, dict):
+                    drug_name = p.get('drug', '')
+                    if drug_name:
+                        drug_count[drug_name] = drug_count.get(drug_name, 0) + 1
+                elif isinstance(p, str):
+                    if p:
+                        drug_count[p] = drug_count.get(p, 0) + 1
+        except:
+            continue
+    
+    sorted_drugs = sorted(drug_count.items(), key=lambda x: x[1], reverse=True)[:limit]
+    
+    return [
+        {"name": name, "count": count}
+        for name, count in sorted_drugs
+    ]
 
 #

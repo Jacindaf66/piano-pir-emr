@@ -132,10 +132,7 @@
         <div class="stat-content">
           <div class="stat-value">{{ doctorStats.total || 0 }}</div>
           <div class="stat-label">总接诊量</div>
-          <div class="stat-trend" :class="doctorStats.totalTrend > 0 ? 'trend-up' : doctorStats.totalTrend < 0 ? 'trend-down' : 'trend-zero'">
-            {{ doctorStats.totalTrend > 0 ? '↑' : doctorStats.totalTrend < 0 ? '↓' : '→' }}
-            {{ Math.abs(doctorStats.totalTrend) }}% 较上月
-          </div>
+         
         </div>
       </div>
     </el-col>
@@ -157,22 +154,22 @@
       </div>
     </el-col>
 
-    <!-- 卡片3：今日接诊 -->
-    <el-col :xs="24" :sm="12" :md="6">
-      <div class="stat-card-item">
-        <div class="stat-icon today-icon">
-          <el-icon><Sunrise /></el-icon>
-        </div>
-        <div class="stat-content">
-          <div class="stat-value">{{ deptStats.today || 0 }}</div>
-          <div class="stat-label">今日接诊</div>
-          <div class="stat-trend" :class="deptStats.todayTrend > 0 ? 'trend-up' : deptStats.todayTrend < 0 ? 'trend-down' : 'trend-zero'">
-            {{ deptStats.todayTrend > 0 ? '↑' : deptStats.todayTrend < 0 ? '↓' : '→' }}
-            {{ Math.abs(deptStats.todayTrend) }}% 较昨日
-          </div>
-        </div>
+<!-- 卡片3：今日接诊 -->
+<el-col :xs="24" :sm="12" :md="6">
+  <div class="stat-card-item">
+    <div class="stat-icon today-icon">
+      <el-icon><Sunrise /></el-icon>
+    </div>
+    <div class="stat-content">
+      <div class="stat-value">{{ doctorStats.today || 0 }}</div>
+      <div class="stat-label">今日接诊</div>
+      <div class="stat-trend" :class="doctorStats.todayTrend > 0 ? 'trend-up' : doctorStats.todayTrend < 0 ? 'trend-down' : 'trend-zero'">
+        {{ doctorStats.todayTrend > 0 ? '↑' : doctorStats.todayTrend < 0 ? '↓' : '→' }}
+        {{ Math.abs(doctorStats.todayTrend) }}% 较昨日
       </div>
-    </el-col>
+    </div>
+  </div>
+</el-col>
 
     <!-- 卡片4：科室排名 -->
     <el-col :xs="24" :sm="12" :md="6">
@@ -290,6 +287,22 @@
       <el-form-item label="科室">
         <el-input v-model="profileForm.department" disabled />
       </el-form-item>
+      <el-form-item label="性别">
+      <el-radio-group v-model="profileForm.gender">
+        <el-radio label="男">男</el-radio>
+        <el-radio label="女">女</el-radio>
+      </el-radio-group>
+    </el-form-item>
+         <el-form-item label="出生日期">
+  <el-date-picker 
+    v-model="profileForm.birth_date" 
+    type="date" 
+    placeholder="选择出生日期" 
+    style="width: 100%" 
+    value-format="YYYY-MM-DD"
+    :clearable="true"
+  />
+</el-form-item>
       <el-form-item label="职称">
         <el-select v-model="profileForm.title" placeholder="请选择职称">
           <el-option label="住院医师" value="住院医师" />
@@ -380,7 +393,7 @@
       <!-- 病历统计视图 -->
       <template v-if="activeTab === 'records-stats'">
         <div class="welcome-banner-mini">
-          <h3>病历统计 - 疾病排行与药品分析</h3>
+          <h3>{{ userInfo.department }}病历统计 - 疾病排行与药品分析</h3>
         </div>
         <el-row :gutter="16">
           <el-col :span="12">
@@ -574,9 +587,30 @@
           <el-date-picker v-model="newRecord.admission_date" type="date" placeholder="选择日期" style="width: 100%" />
         </el-form-item>
         
-        <el-form-item label="诊断" prop="diagnosis">
-          <el-input v-model="newRecord.diagnosis" type="textarea" :rows="2" placeholder="请输入诊断" />
-        </el-form-item>
+<el-form-item label="诊断" prop="diagnosis">
+  <div class="diagnosis-input-wrapper">
+    <el-input 
+      v-model="newRecord.diagnosis" 
+      type="textarea" 
+      :rows="3" 
+      placeholder="请输入诊断，可点击下方快捷按钮快速填写"
+    />
+    <div class="diagnosis-quick-buttons" v-if="currentDepartmentDiagnoses.length > 0">
+      <span class="quick-label">📋 快速填写：</span>
+      <div class="diagnosis-tags">
+        <el-tag
+          v-for="diag in currentDepartmentDiagnoses"
+          :key="diag"
+          size="small"
+          class="diagnosis-tag"
+          @click="setDiagnosis(diag)"
+        >
+          {{ diag }}
+        </el-tag>
+      </div>
+    </div>
+  </div>
+</el-form-item>
         
 <el-form-item label="治疗项目">
   <el-select 
@@ -597,27 +631,215 @@
   </el-select>
 </el-form-item>
         
-        <el-form-item label="处方">
-          <div v-for="(pres, idx) in newRecord.prescriptions" :key="idx" class="prescription-item">
-            <el-input v-model="pres.drug" placeholder="药品名称" style="width: 40%" />
-            <el-input v-model="pres.dosage" placeholder="用法用量" style="width: 40%; margin-left: 10px" />
-            <el-button type="danger" link @click="removePrescription(idx)" style="margin-left: 10px">删除</el-button>
-          </div>
-          <el-button type="primary" link @click="addPrescription">+ 添加药品</el-button>
-        </el-form-item>
+<el-form-item label="处方">
+  <div class="prescription-list">
+    <div v-for="(pres, idx) in newRecord.prescriptions" :key="idx" class="prescription-card">
+      <!-- 卡片头部 -->
+      <div class="prescription-card-header">
+        <span class="prescription-number">药品 {{ idx + 1 }}</span>
+        <el-button type="danger" link @click="removePrescription(idx)">
+          <el-icon><Delete /></el-icon>
+          删除
+        </el-button>
+      </div>
+      
+      <!-- 第一行：药品名称 -->
+      <div class="prescription-row">
+        <div class="prescription-label">药品名称</div>
+        <div class="prescription-drug">
+          <el-select
+            v-model="pres.drug"
+            filterable
+            allow-create
+            default-first-option
+            placeholder="请选择或输入药品"
+            style="width: 100%"
+            @change="onDrugChange(pres, idx)"
+          >
+            <el-option
+              v-for="drug in recommendedDrugs"
+              :key="drug.name"
+              :label="drug.name"
+              :value="drug.name"
+            />
+          </el-select>
+        </div>
+      </div>
+      
+      <!-- 第二行：剂量、单位、频率 -->
+      <div class="prescription-row three-col">
+        <div class="prescription-dose-group">
+          <div class="prescription-label">剂量</div>
+          <el-input-number 
+            v-model="pres.dose" 
+            :min="0" 
+            :step="0.5"
+            placeholder="剂量"
+            controls-position="right"
+            style="width: 100%"
+          />
+        </div>
+        <div class="prescription-unit-group">
+          <div class="prescription-label">单位</div>
+          <el-select v-model="pres.unit" placeholder="单位" allow-create filterable>
+            <el-option label="mg" value="mg" />
+            <el-option label="g" value="g" />
+            <el-option label="片" value="片" />
+            <el-option label="粒" value="粒" />
+            <el-option label="ml" value="ml" />
+            <el-option label="支" value="支" />
+            <el-option label="贴" value="贴" />
+          </el-select>
+        </div>
+        <div class="prescription-frequency-group">
+          <div class="prescription-label">频率</div>
+          <el-select v-model="pres.frequency" placeholder="频率" allow-create filterable>
+            <el-option label="每日1次" value="每日1次" />
+            <el-option label="每日2次" value="每日2次" />
+            <el-option label="每日3次" value="每日3次" />
+            <el-option label="每日4次" value="每日4次" />
+            <el-option label="每8小时1次" value="每8小时1次" />
+            <el-option label="每12小时1次" value="每12小时1次" />
+            <el-option label="必要时" value="必要时" />
+          </el-select>
+        </div>
+      </div>
+      
+      <!-- 第三行：备注（多选 + 自定义） -->
+      <div class="prescription-row">
+        <div class="prescription-label">备注</div>
+        <div class="prescription-remark">
+          <el-select 
+            v-model="pres.remark" 
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            placeholder="选择或输入服用时间、注意事项等"
+            style="width: 100%"
+          >
+            <el-option label="餐前" value="餐前" />
+            <el-option label="餐后" value="餐后" />
+            <el-option label="餐中" value="餐中" />
+            <el-option label="空腹" value="空腹" />
+            <el-option label="睡前" value="睡前" />
+            <el-option label="晨起" value="晨起" />
+            <el-option label="饭后服用" value="饭后服用" />
+            <el-option label="多喝水" value="多喝水" />
+            <el-option label="忌饮酒" value="忌饮酒" />
+            <el-option label="避光保存" value="避光保存" />
+          </el-select>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <el-button type="primary" plain @click="addPrescription" class="add-prescription-btn">
+    <el-icon><Plus /></el-icon>
+    添加药品
+  </el-button>
+</el-form-item>
 
-        <el-form-item label="检验结果">
-          <div v-for="(value, key) in newRecord.lab_results" :key="key" class="lab-item">
-            <span style="width: 100px">{{ key }}：</span>
-            <el-input v-model="newRecord.lab_results[key]" placeholder="结果值" style="width: 200px" />
-            <el-button type="danger" link @click="delete newRecord.lab_results[key]">删除</el-button>
-          </div>
-          <div class="add-lab">
-            <el-input v-model="newLabKey" placeholder="项目名称" style="width: 150px" />
-            <el-input v-model="newLabValue" placeholder="结果值" style="width: 150px; margin-left: 10px" />
-            <el-button type="primary" link @click="addLabItem" style="margin-left: 10px">添加</el-button>
-          </div>
-        </el-form-item>
+<el-form-item label="检验结果">
+  <!-- 快速添加按钮 -->
+  <div class="lab-quick-buttons" v-if="currentDepartmentLabs.length > 0">
+    <span class="quick-label">📋 快速添加：</span>
+    <el-tag
+      v-for="lab in currentDepartmentLabs"
+      :key="lab.name"
+      size="small"
+      class="lab-tag"
+      @click="addQuickLab(lab.name, '')"
+    >
+      {{ lab.name }}
+    </el-tag>
+  </div>
+
+  <!-- 项目列表（卡片式） -->
+  <div v-for="(item, idx) in newRecord.lab_results" :key="idx" class="lab-card">
+    <div class="lab-card-header">
+      <span class="lab-number">检查项目 {{ idx + 1 }}</span>
+      <el-button type="danger" link @click="removeLabItem(idx)">
+        <el-icon><Delete /></el-icon>
+        删除
+      </el-button>
+    </div>
+    
+    <!-- 第一行：项目名称 -->
+    <div class="lab-row">
+      <div class="lab-label">项目名称</div>
+      <div class="lab-name">
+        <el-select
+          v-model="item.name"
+          filterable
+          allow-create
+          default-first-option
+          placeholder="选择或输入项目"
+          style="width: 100%"
+        >
+          <el-option
+            v-for="lab in recommendedLabs"
+            :key="lab.name"
+            :label="lab.name"
+            :value="lab.name"
+          />
+        </el-select>
+      </div>
+    </div>
+    
+    <!-- 第二行：结果 -->
+    <div class="lab-row">
+      <div class="lab-label">结果</div>
+      <div class="lab-value">
+        <el-input 
+          v-model="item.result" 
+          type="textarea"
+          :rows="2"
+          placeholder="例如：120/80 mmHg、房颤、5.6、阳性等"
+          style="width: 100%"
+        />
+      </div>
+    </div>
+    
+    <!-- 第三行：单位 + 参考范围 + 异常标记 -->
+    <div class="lab-row three-col">
+      <div class="lab-unit-group">
+        <div class="lab-label">单位（可选）</div>
+        <el-select v-model="item.unit" placeholder="单位" allow-create filterable clearable>
+          <el-option label="mmol/L" value="mmol/L" />
+          <el-option label="umol/L" value="umol/L" />
+          <el-option label="g/L" value="g/L" />
+          <el-option label="mg/L" value="mg/L" />
+          <el-option label="U/L" value="U/L" />
+          <el-option label="IU/L" value="IU/L" />
+          <el-option label="%" value="%" />
+        </el-select>
+      </div>
+      <div class="lab-range-group">
+        <div class="lab-label">参考范围（可选）</div>
+        <el-input 
+          v-model="item.range" 
+          placeholder="如：3.9-6.1"
+        />
+      </div>
+      <div class="lab-flag-group">
+        <div class="lab-label">异常标记（可选）</div>
+        <el-select v-model="item.flag" placeholder="请选择" clearable>
+          <el-option label="正常" value="normal" />
+          <el-option label="↑ 偏高" value="high" />
+          <el-option label="↓ 偏低" value="low" />
+          <el-option label="危急值" value="critical" />
+        </el-select>
+      </div>
+    </div>
+  </div>
+  
+  <!-- 添加按钮（与处方样式一致） -->
+  <el-button type="primary" plain class="add-lab-btn" @click="addLabItem">
+    <el-icon><Plus /></el-icon>
+    添加检验项目
+  </el-button>
+</el-form-item>
 
         <el-form-item label="影像报告">
           <el-select 
@@ -713,6 +935,404 @@ const goToRecords = () => {
   emit('menu-change', 'records')
 }
 
+// 科室对应的常见诊断
+const departmentDiagnosesMap = {
+  '心内科': ['冠心病', '高血压III级', '心律失常', '心力衰竭', '心肌炎', '心绞痛', '心肌梗死', '心脏瓣膜病'],
+  '呼吸内科': ['急性支气管炎', '肺炎', '慢性阻塞性肺疾病', '哮喘', '肺气肿', '肺结核', '支气管扩张', '肺癌'],
+  '神经内科': ['脑梗死', '短暂性脑缺血发作', '偏头痛', '帕金森病', '癫痫', '脑出血', '阿尔茨海默病', '周围神经病'],
+  '骨科': ['腰椎间盘突出症', '颈椎病', '胫骨骨折', '股骨颈骨折', '关节炎', '骨质疏松', '肩周炎', '腱鞘炎'],
+  '普外科': ['急性阑尾炎', '腹股沟疝', '胆囊结石', '甲状腺结节', '肠梗阻', '胰腺炎', '胃穿孔', '痔疮'],
+  '消化内科': ['慢性胃炎', '胃溃疡', '肝硬化', '十二指肠溃疡', '结肠炎', '胆结石', '反流性食管炎', '胰腺炎'],
+  '内分泌科': ['2型糖尿病', '甲状腺功能亢进', '痛风', '甲减', '肥胖症', '高脂血症', '骨质疏松', '糖尿病并发症']
+}
+
+// 根据当前科室获取诊断列表
+const currentDepartmentDiagnoses = computed(() => {
+  const dept = newRecord.department
+  return departmentDiagnosesMap[dept] || []
+})
+
+// 快速设置诊断（追加模式）
+const setDiagnosis = (diagnosis) => {
+  if (newRecord.diagnosis) {
+    // 已有内容，换行追加
+    newRecord.diagnosis = newRecord.diagnosis + '\n' + diagnosis
+  } else {
+    // 没有内容，直接设置
+    newRecord.diagnosis = diagnosis
+  }
+}
+
+// 根据诊断推荐的药品
+const drugRecommendations = {
+  // 心内科
+  '高血压': [
+    { name: '硝苯地平片', defaultDose: 10, unit: 'mg', frequency: '每日1次', remark: ['餐后'] },
+    { name: '厄贝沙坦片', defaultDose: 150, unit: 'mg', frequency: '每日1次', remark: ['餐后'] },
+    { name: '氢氯噻嗪片', defaultDose: 25, unit: 'mg', frequency: '每日1次', remark: ['晨起'] },
+    { name: '倍他乐克', defaultDose: 25, unit: 'mg', frequency: '每日2次', remark: ['餐后'] },
+    { name: '卡托普利片', defaultDose: 25, unit: 'mg', frequency: '每日3次', remark: ['餐前'] },
+    { name: '氯沙坦钾片', defaultDose: 50, unit: 'mg', frequency: '每日1次', remark: ['餐后'] }
+  ],
+  '冠心病': [
+    { name: '阿司匹林肠溶片', defaultDose: 100, unit: 'mg', frequency: '每日1次', remark: ['空腹'] },
+    { name: '氯吡格雷片', defaultDose: 75, unit: 'mg', frequency: '每日1次', remark: ['餐后'] },
+    { name: '阿托伐他汀钙片', defaultDose: 20, unit: 'mg', frequency: '每日1次', remark: ['睡前'] },
+    { name: '瑞舒伐他汀钙片', defaultDose: 10, unit: 'mg', frequency: '每日1次', remark: ['睡前'] },
+    { name: '单硝酸异山梨酯', defaultDose: 20, unit: 'mg', frequency: '每日2次', remark: ['餐后'] }
+  ],
+  '心力衰竭': [
+    { name: '呋塞米片', defaultDose: 20, unit: 'mg', frequency: '每日1次', remark: ['晨起'] },
+    { name: '螺内酯片', defaultDose: 20, unit: 'mg', frequency: '每日1次', remark: ['餐后'] },
+    { name: '依那普利片', defaultDose: 10, unit: 'mg', frequency: '每日2次', remark: ['餐后'] },
+    { name: '地高辛片', defaultDose: 0.125, unit: 'mg', frequency: '每日1次', remark: ['餐前'] }
+  ],
+  '心律失常': [
+    { name: '胺碘酮片', defaultDose: 200, unit: 'mg', frequency: '每日1次', remark: ['餐后'] },
+    { name: '普罗帕酮片', defaultDose: 150, unit: 'mg', frequency: '每日3次', remark: ['餐后'] },
+    { name: '美托洛尔片', defaultDose: 25, unit: 'mg', frequency: '每日2次', remark: ['餐后'] }
+  ],
+  
+  // 内分泌科
+  '糖尿病': [
+    { name: '二甲双胍片', defaultDose: 500, unit: 'mg', frequency: '每日2次', remark: ['餐后'] },
+    { name: '格列齐特片', defaultDose: 80, unit: 'mg', frequency: '每日2次', remark: ['餐前'] },
+    { name: '阿卡波糖片', defaultDose: 50, unit: 'mg', frequency: '每日3次', remark: ['餐前'] },
+    { name: '胰岛素注射液', defaultDose: 10, unit: '单位', frequency: '每日1次', remark: ['餐前', '冷藏保存'] },
+    { name: '达格列净片', defaultDose: 10, unit: 'mg', frequency: '每日1次', remark: ['晨起'] },
+    { name: '西格列汀片', defaultDose: 100, unit: 'mg', frequency: '每日1次', remark: ['餐后'] }
+  ],
+  '甲亢': [
+    { name: '甲巯咪唑片', defaultDose: 10, unit: 'mg', frequency: '每日3次', remark: ['餐后'] },
+    { name: '丙硫氧嘧啶片', defaultDose: 50, unit: 'mg', frequency: '每日3次', remark: ['餐后'] },
+    { name: '普萘洛尔片', defaultDose: 10, unit: 'mg', frequency: '每日3次', remark: ['餐后'] }
+  ],
+  '甲减': [
+    { name: '左甲状腺素钠片', defaultDose: 50, unit: 'ug', frequency: '每日1次', remark: ['空腹'] }
+  ],
+  '痛风': [
+    { name: '别嘌醇片', defaultDose: 100, unit: 'mg', frequency: '每日1次', remark: ['餐后'] },
+    { name: '非布司他片', defaultDose: 40, unit: 'mg', frequency: '每日1次', remark: ['餐后'] },
+    { name: '秋水仙碱片', defaultDose: 0.5, unit: 'mg', frequency: '每日2次', remark: ['餐后'] }
+  ],
+  
+  // 呼吸内科
+  '肺炎': [
+    { name: '阿莫西林胶囊', defaultDose: 500, unit: 'mg', frequency: '每日3次', remark: ['餐后'] },
+    { name: '头孢克肟胶囊', defaultDose: 100, unit: 'mg', frequency: '每日2次', remark: ['餐后'] },
+    { name: '左氧氟沙星片', defaultDose: 500, unit: 'mg', frequency: '每日1次', remark: ['餐后'] },
+    { name: '阿奇霉素片', defaultDose: 500, unit: 'mg', frequency: '每日1次', remark: ['餐后'] }
+  ],
+  '哮喘': [
+    { name: '沙丁胺醇气雾剂', defaultDose: 2, unit: '喷', frequency: '必要时', remark: [] },
+    { name: '布地奈德气雾剂', defaultDose: 2, unit: '喷', frequency: '每日2次', remark: ['吸药后漱口'] },
+    { name: '孟鲁司特钠片', defaultDose: 10, unit: 'mg', frequency: '每日1次', remark: ['睡前'] }
+  ],
+  'COPD': [
+    { name: '噻托溴铵粉雾剂', defaultDose: 1, unit: '粒', frequency: '每日1次', remark: ['晨起'] },
+    { name: '氨溴索片', defaultDose: 30, unit: 'mg', frequency: '每日3次', remark: ['餐后'] }
+  ],
+  
+  // 消化内科
+  '胃炎': [
+    { name: '奥美拉唑肠溶胶囊', defaultDose: 20, unit: 'mg', frequency: '每日1次', remark: ['空腹'] },
+    { name: '铝碳酸镁咀嚼片', defaultDose: 500, unit: 'mg', frequency: '每日3次', remark: ['餐后'] },
+    { name: '多潘立酮片', defaultDose: 10, unit: 'mg', frequency: '每日3次', remark: ['餐前'] },
+    { name: '胶体果胶铋', defaultDose: 150, unit: 'mg', frequency: '每日4次', remark: ['餐前'] }
+  ],
+  '胃溃疡': [
+    { name: '雷贝拉唑钠肠溶片', defaultDose: 20, unit: 'mg', frequency: '每日1次', remark: ['空腹'] },
+    { name: '硫糖铝片', defaultDose: 1, unit: 'g', frequency: '每日4次', remark: ['餐前'] },
+    { name: '克拉霉素片', defaultDose: 500, unit: 'mg', frequency: '每日2次', remark: ['餐后'] }
+  ],
+  
+  // 骨科
+  '腰椎间盘突出': [
+    { name: '布洛芬缓释胶囊', defaultDose: 300, unit: 'mg', frequency: '每日2次', remark: ['餐后'] },
+    { name: '甲钴胺片', defaultDose: 0.5, unit: 'mg', frequency: '每日3次', remark: ['餐后'] },
+    { name: '盐酸乙哌立松片', defaultDose: 50, unit: 'mg', frequency: '每日3次', remark: ['餐后'] },
+    { name: '塞来昔布胶囊', defaultDose: 200, unit: 'mg', frequency: '每日1次', remark: ['餐后'] }
+  ],
+  '骨折': [
+    { name: '骨化三醇胶丸', defaultDose: 0.25, unit: 'ug', frequency: '每日2次', remark: ['餐后'] },
+    { name: '碳酸钙D3片', defaultDose: 600, unit: 'mg', frequency: '每日1次', remark: ['餐后'] },
+    { name: '伤科接骨片', defaultDose: 4, unit: '片', frequency: '每日3次', remark: ['餐后'] }
+  ],
+  
+  // 神经内科
+  '脑梗死': [
+    { name: '阿司匹林肠溶片', defaultDose: 100, unit: 'mg', frequency: '每日1次', remark: ['空腹'] },
+    { name: '氯吡格雷片', defaultDose: 75, unit: 'mg', frequency: '每日1次', remark: ['餐后'] },
+    { name: '丁苯酞软胶囊', defaultDose: 200, unit: 'mg', frequency: '每日3次', remark: ['餐后'] }
+  ],
+  
+  // 普外科
+  '阑尾炎': [
+    { name: '头孢曲松钠', defaultDose: 2, unit: 'g', frequency: '每日1次', remark: ['静滴'] },
+    { name: '甲硝唑氯化钠', defaultDose: 0.5, unit: 'g', frequency: '每日2次', remark: ['静滴'] }
+  ]
+}
+// 通用药品列表
+const commonDrugs = [
+  '阿莫西林', '头孢克肟', '阿奇霉素', '左氧氟沙星',
+  '布洛芬', '对乙酰氨基酚', '阿司匹林',
+  '二甲双胍', '格列齐特', '胰岛素',
+  '硝苯地平', '厄贝沙坦', '倍他乐克',
+  '奥美拉唑', '铝碳酸镁', '多潘立酮',
+  '甲钴胺', '维生素B1', '维生素C'
+]
+
+// 根据当前诊断获取推荐药品
+const recommendedDrugs = computed(() => {
+  const diagnosis = newRecord.diagnosis
+  // 匹配诊断关键词
+  for (const [key, drugs] of Object.entries(drugRecommendations)) {
+    if (diagnosis.includes(key)) {
+      return drugs
+    }
+  }
+  // 返回通用药品列表
+  return commonDrugs.map(name => ({ name, defaultDose: null, unit: '片', frequency: '每日1次' }))
+})
+
+// 选择药品时自动填充默认剂量和用法
+const onDrugChange = (pres, idx) => {
+  const diagnosis = newRecord.diagnosis
+  for (const [key, drugs] of Object.entries(drugRecommendations)) {
+    if (diagnosis.includes(key)) {
+      const found = drugs.find(d => d.name === pres.drug)
+      if (found) {
+        pres.dose = found.defaultDose
+        pres.unit = found.unit
+        pres.frequency = found.frequency
+        pres.remark = found.remark || []
+      }
+      break
+    }
+  }
+}
+
+/**
+ * 处方对象数据结构
+ * @typedef {Object} Prescription
+ * @property {string} drug - 药品名称
+ * @property {number} dose - 剂量数值
+ * @property {string} unit - 剂量单位（g/mg/片/粒/ml/支等）
+ * @property {string} frequency - 用法频率（每日1次、每日2次、餐前等）
+ * @property {string} remark - 备注说明（可选）
+ */
+
+// 添加处方数据结构
+const addPrescription = () => {
+  newRecord.prescriptions.push({
+    drug: '',
+    dose: null,
+    unit: '片',
+    frequency: '每日1次',
+    remark: []  // 改为数组，支持多选
+  })
+}
+
+// 添加带备注的处方
+const addPrescriptionWithRemark = () => {
+  newRecord.prescriptions.push({
+    drug: '',
+    dose: null,
+    unit: '片',
+    frequency: '每日1次',
+    remark: ''
+  })
+  // 聚焦到备注输入框（可选）
+}
+
+// 根据科室推荐的检验项目
+const labRecommendationsByDept = {
+  '心内科': [
+    { name: '肌钙蛋白I', unit: 'ng/mL', range: '<0.04', normalRange: '<0.04' },
+    { name: 'CK-MB', unit: 'U/L', range: '0-24', normalRange: '0-24' },
+    { name: 'BNP', unit: 'pg/mL', range: '<100', normalRange: '<100' },
+    { name: '血脂四项', unit: 'mmol/L', range: '总胆固醇<5.2', normalRange: '总胆固醇<5.2' },
+    { name: '心电图', unit: '', range: '正常', normalRange: '正常' }
+  ],
+  '呼吸内科': [
+    { name: '血常规', unit: '×10^9/L', range: 'WBC 4-10', normalRange: '4-10' },
+    { name: 'C反应蛋白', unit: 'mg/L', range: '<10', normalRange: '<10' },
+    { name: '降钙素原', unit: 'ng/mL', range: '<0.5', normalRange: '<0.5' },
+    { name: '血气分析', unit: 'mmHg', range: 'PaO2 80-100', normalRange: '80-100' },
+    { name: '痰培养', unit: '', range: '无致病菌', normalRange: '无致病菌' }
+  ],
+  '神经内科': [
+    { name: '头颅CT', unit: '', range: '未见异常', normalRange: '未见异常' },
+    { name: '头颅MRI', unit: '', range: '未见异常', normalRange: '未见异常' },
+    { name: '脑电图', unit: '', range: '正常', normalRange: '正常' },
+    { name: '颈动脉超声', unit: '', range: '未见异常', normalRange: '未见异常' }
+  ],
+  '骨科': [
+    { name: '血钙', unit: 'mmol/L', range: '2.1-2.6', normalRange: '2.1-2.6' },
+    { name: '血磷', unit: 'mmol/L', range: '0.8-1.45', normalRange: '0.8-1.45' },
+    { name: '碱性磷酸酶', unit: 'U/L', range: '40-130', normalRange: '40-130' },
+    { name: '维生素D', unit: 'ng/mL', range: '>30', normalRange: '>30' },
+    { name: '骨密度', unit: 'T值', range: '>-1.0', normalRange: '>-1.0' }
+  ],
+  '内分泌科': [
+    { name: '空腹血糖', unit: 'mmol/L', range: '3.9-6.1', normalRange: '3.9-6.1' },
+    { name: '糖化血红蛋白', unit: '%', range: '4-6', normalRange: '4-6' },
+    { name: '甲状腺功能', unit: '', range: 'FT3/FT4/TSH正常', normalRange: '正常' },
+    { name: '胰岛素', unit: 'uIU/mL', range: '2.6-24.9', normalRange: '2.6-24.9' },
+    { name: 'C肽', unit: 'ng/mL', range: '1.1-4.4', normalRange: '1.1-4.4' }
+  ],
+  '消化内科': [
+    { name: '肝功能', unit: 'U/L', range: 'ALT<40', normalRange: 'ALT<40' },
+    { name: '肾功能', unit: 'umol/L', range: 'Cr 44-104', normalRange: '44-104' },
+    { name: '胃镜', unit: '', range: '未见异常', normalRange: '未见异常' },
+    { name: '幽门螺杆菌', unit: '', range: '阴性', normalRange: '阴性' },
+    { name: '便常规', unit: '', range: '阴性', normalRange: '阴性' }
+  ]
+}
+
+// 根据诊断关键词推荐的检验项目
+const labRecommendationsByDiagnosis = {
+  '糖尿病': [
+    { name: '空腹血糖', unit: 'mmol/L', range: '3.9-6.1' },
+    { name: '餐后2h血糖', unit: 'mmol/L', range: '<7.8' },
+    { name: '糖化血红蛋白', unit: '%', range: '4-6' },
+    { name: '尿微量白蛋白', unit: 'mg/L', range: '<30' }
+  ],
+  '高血压': [
+    { name: '动态血压', unit: 'mmHg', range: '白天<135/85' },
+    { name: '肾功能', unit: 'umol/L', range: '44-104' },
+    { name: '尿常规', unit: '', range: '正常' }
+  ],
+  '冠心病': [
+    { name: '肌钙蛋白', unit: 'ng/mL', range: '<0.04' },
+    { name: 'CK-MB', unit: 'U/L', range: '0-24' },
+    { name: '血脂', unit: 'mmol/L', range: 'LDL-C<2.6' }
+  ],
+  '肺炎': [
+    { name: '血常规', unit: '×10^9/L', range: '4-10' },
+    { name: 'C反应蛋白', unit: 'mg/L', range: '<10' },
+    { name: '胸片', unit: '', range: '未见异常' }
+  ]
+}
+
+// 根据当前科室和诊断获取推荐检验项目
+const recommendedLabs = computed(() => {
+  const dept = newRecord.department
+  const diagnosis = newRecord.diagnosis
+  
+  // 优先根据诊断匹配
+  for (const [key, labs] of Object.entries(labRecommendationsByDiagnosis)) {
+    if (diagnosis.includes(key)) {
+      return labs
+    }
+  }
+  
+  // 其次根据科室匹配
+  if (dept && labRecommendationsByDept[dept]) {
+    return labRecommendationsByDept[dept]
+  }
+  
+  // 通用检验项目
+  return [
+    { name: '血常规', unit: '×10^9/L', range: '4-10' },
+    { name: '尿常规', unit: '', range: '正常' },
+    { name: '肝功能', unit: 'U/L', range: 'ALT<40' },
+    { name: '肾功能', unit: 'umol/L', range: 'Cr 44-104' },
+    { name: '电解质', unit: 'mmol/L', range: '正常' }
+  ]
+})
+
+// 选择检验项目时自动填充默认单位和参考范围
+const onLabItemChange = (item, idx) => {
+  const dept = newRecord.department
+  const diagnosis = newRecord.diagnosis
+  
+  // 根据诊断匹配
+  for (const [key, labs] of Object.entries(labRecommendationsByDiagnosis)) {
+    if (diagnosis.includes(key)) {
+      const found = labs.find(l => l.name === item.name)
+      if (found) {
+        item.unit = found.unit
+        item.range = found.range
+      }
+      return
+    }
+  }
+  
+  // 根据科室匹配
+  if (dept && labRecommendationsByDept[dept]) {
+    const found = labRecommendationsByDept[dept].find(l => l.name === item.name)
+    if (found) {
+      item.unit = found.unit
+      item.range = found.range
+    }
+  }
+}
+
+// 根据当前科室获取快速添加的检验项目（用于快捷按钮）
+const currentDepartmentLabs = computed(() => {
+  const dept = newRecord.department
+  if (dept && labRecommendationsByDept[dept]) {
+    return labRecommendationsByDept[dept]
+  }
+  return []
+})
+
+// 快速添加检验项目
+const addQuickLab = (labName, defaultValue) => {
+  newRecord.lab_results.push({
+    name: labName,
+    result: '',
+    unit: '',
+    range: '',
+    flag: ''
+  })
+  ElMessage.success(`已添加 ${labName}`)
+}
+
+// 添加检验项目
+// const addLabItem = () => {
+//   if (newLabKey.value && newLabValue.value) {
+//     newRecord.lab_results[newLabKey.value] = newLabValue.value
+//     newLabKey.value = ''
+//     newLabValue.value = ''
+//   }
+// }
+// 添加检验项目（数组版本）
+const addLabItem = () => {
+  newRecord.lab_results.push({
+    name: '',
+    result: '',
+    unit: '',
+    range: '',
+    flag: ''
+  })
+}
+
+// 添加常见组合（快速添加一组检验项目）
+const addQuickLabs = () => {
+  const labs = recommendedLabs.value
+  labs.forEach(lab => {
+    newRecord.lab_results.push({
+      name: lab.name,
+      result: '',
+      unit: lab.unit || '',
+      range: lab.range || '',
+      flag: ''
+    })
+  })
+  ElMessage.success(`已添加 ${labs.length} 个推荐检验项目`)
+}
+
+// 删除检验项目
+// const removeLabItem = (key) => {
+//   delete newRecord.lab_results[key]
+// }
+// 删除检验项目（数组版本）
+const removeLabItem = (idx) => {
+  newRecord.lab_results.splice(idx, 1)
+}
+
 // 根据病历ID查看详情
 const viewRecordById = (recordId) => {
   const record = records.value.find(r => r.record_id === recordId)
@@ -753,6 +1373,8 @@ const avatarInput = ref(null)
 const profileForm = ref({
   name: userInfo.value.name || '',
   department: userInfo.value.department || '',
+  gender: '男',
+  birth_date: '',
   title: '主治医师',
   phone: '',
   email: ''
@@ -774,6 +1396,8 @@ const saveProfile = async () => {
     
     const dataToSave = {
       title: profileForm.value.title,
+      gender: profileForm.value.gender, 
+      birth_date: profileForm.value.birth_date,
       phone: profileForm.value.phone,
       email: profileForm.value.email,
       join_date: profileForm.value.join_date,
@@ -801,6 +1425,7 @@ const loadUserProfile = async () => {
       name: res.data.name || userInfo.value.name,
       department: res.data.department || userInfo.value.department,
       gender: res.data.gender || '男',
+      birth_date: res.data.birth_date || '',
       birth_date: res.data.birth_date || '',
       title: res.data.title || '主治医师',
       phone: res.data.phone || '',
@@ -1099,8 +1724,10 @@ const deptStats = ref({ total: 0, today: 0, month: 0 })
 const doctorStats = ref({
   total: 0,
   month: 0,
+  today: 0,
   totalTrend: 0,
-  monthTrend: 0
+  monthTrend: 0,
+  todayTrend: 0
 })
 
 // 医生接诊趋势
@@ -1129,7 +1756,7 @@ let pianoClient = null
 
 // 新建病历
 const departments = ref(['心内科', '呼吸内科', '神经内科', '骨科', '普外科', '消化内科', '内分泌科'])
-const treatmentOptions = ref(['一级护理', '二级护理', '三级护理', '物理治疗', '药物治疗','康复训练', '针灸', '推拿'])
+const treatmentOptions = ref(['一级护理', '二级护理', '三级护理', '物理治疗', '药物治疗','血压监测','吸氧','心电监护','康复训练', '针灸', '推拿'])
 const showCreateRecord = ref(false)
 const createLoading = ref(false)
 const recordFormRef = ref(null)
@@ -1147,7 +1774,7 @@ const newRecord = reactive({
   diagnosis: '',
   treatments: [],
   prescriptions: [],
-  lab_results: {},
+  lab_results: [],
   imaging_reports: '',
   notes: ''
 })
@@ -1167,14 +1794,6 @@ const recordRules = {
 const newLabKey = ref('')
 const newLabValue = ref('')
 
-// 添加检验项目
-function addLabItem() {
-  if (newLabKey.value && newLabValue.value) {
-    newRecord.lab_results[newLabKey.value] = newLabValue.value
-    newLabKey.value = ''
-    newLabValue.value = ''
-  }
-}
 
 // 加载科室统计
 async function loadDeptStats() {
@@ -1234,6 +1853,20 @@ async function loadDeptStats() {
 // 加载医生个人统计数据
 async function loadDoctorStats() {
   try {
+    const today = new Date().toISOString().split('T')[0]
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0]
+    
+    // 计算本月第一天
+    const now = new Date()
+    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+    const firstDayOfMonthStr = firstDayOfMonth.toISOString().split('T')[0]
+    
+    // 计算上月第一天和最后一天
+    const firstDayOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    const lastDayOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0)
+    const firstDayOfLastMonthStr = firstDayOfLastMonth.toISOString().split('T')[0]
+    const lastDayOfLastMonthStr = lastDayOfLastMonth.toISOString().split('T')[0]
+    
     // 获取全部病历
     const res = await axios.get(`${BASE_URL}/records/list`, {
       params: { limit: 10000 }
@@ -1242,19 +1875,48 @@ async function loadDoctorStats() {
     const allRecords = res.data.records || []
     const records = allRecords.filter(r => r.doctor_name === userInfo.value.name)
     
+    // 总接诊量
     const total = records.length
     
-    const oneMonthAgo = new Date()
-    oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1)
-    const oneMonthAgoStr = oneMonthAgo.toISOString().split('T')[0]
-    const monthRecords = records.filter(r => r.admission_date >= oneMonthAgoStr)
+    // 本月接诊量（本月第一天到今天）
+    const monthRecords = records.filter(r => r.admission_date >= firstDayOfMonthStr)
     const month = monthRecords.length
+    
+    // 上月接诊量（上月整月，用于环比）
+    const lastMonthRecords = records.filter(r => r.admission_date >= firstDayOfLastMonthStr && r.admission_date <= lastDayOfLastMonthStr)
+    const lastMonth = lastMonthRecords.length
+    
+    // 今日接诊量（个人）
+    const todayRecords = records.filter(r => r.admission_date === today)
+    const todayCount = todayRecords.length
+    
+    // 昨日接诊量（个人，用于环比）
+    const yesterdayRecords = records.filter(r => r.admission_date === yesterday)
+    const yesterdayCount = yesterdayRecords.length
+    
+    // 计算本月环比
+    let monthTrend = 0
+    if (lastMonth === 0 && month > 0) {
+      monthTrend = 100
+    } else if (lastMonth > 0) {
+      monthTrend = ((month - lastMonth) / lastMonth * 100).toFixed(1)
+    }
+    
+    // 计算今日环比
+    let todayTrend = 0
+    if (yesterdayCount === 0 && todayCount > 0) {
+      todayTrend = 100
+    } else if (yesterdayCount > 0) {
+      todayTrend = ((todayCount - yesterdayCount) / yesterdayCount * 100).toFixed(1)
+    }
     
     doctorStats.value = {
       total: total,
       month: month,
+      today: todayCount,
       totalTrend: 0,
-      monthTrend: 0
+      monthTrend: parseFloat(monthTrend),
+      todayTrend: parseFloat(todayTrend)
     }
     
     doctorRecentRecords.value = records.slice(0, 5).map(r => ({
@@ -1278,10 +1940,8 @@ async function loadDoctorStats() {
       doctorRank.value = { rank: 0, total: 0 }
     }
     
-    // ⭐ 加载个人资料（新增）
     await loadUserProfile()
     
-    // 加载个人接诊趋势图
     await nextTick()
     if (doctorTrendChart.value) {
       initDoctorTrendChart(records)
@@ -1479,16 +2139,6 @@ async function viewRecord(row) {
   }
 }
 
-
-// 新建病历相关
-function addPrescription() {
-  newRecord.prescriptions.push({ drug: '', dosage: '' })
-}
-
-function removeLabItem(index) {
-  newRecord.lab_items.splice(index, 1)
-}
-
 // 加载医生列表
 async function loadDoctors() {
   doctorLoading.value = true
@@ -1552,16 +2202,153 @@ async function onDepartmentChange(dept) {
 }
 
 //创建病历
+// async function createRecord() {
+//   if (!recordFormRef.value) return
+//   await recordFormRef.value.validate(async valid => {
+//     if (!valid) return
+
+//     // ⭐ 添加日志
+//     console.log('=== 提交前检查 ===')
+//     console.log('diagnosis 值:', newRecord.diagnosis)
+//     console.log('diagnosis 类型:', typeof newRecord.diagnosis)
+//     console.log('diagnosis 是否为数组:', Array.isArray(newRecord.diagnosis))
+
+//     createLoading.value = true
+//     try {
+//       const res = await axios.post('/records/create', {
+//         ...newRecord,
+//         admission_date: new Date(newRecord.admission_date).toISOString().split('T')[0],
+//         diagnosis: newRecord.diagnosis,
+//         lab_results: labResultsObj,
+//         prescriptions: newRecord.prescriptions.filter(p => p.drug)
+//       })
+//       ElMessage.success('创建成功：' + res.data.record_id)
+//       showCreateRecord.value = false
+      
+//       // 重置表单
+//       Object.assign(newRecord, {
+//         name: '', gender: 'M', age: 30, id_card: '', department: '',
+//         doctor_id: '', admission_date: new Date(), diagnosis: '',
+//         treatments: [], prescriptions: [], notes: ''
+//       })
+//       newRecord.lab_results = []
+//       newRecord.imaging_reports = ''
+      
+//       // 重新加载病历列表
+//       await loadRecords()
+//       await loadDeptStats()
+      
+//       // ⭐ 延迟1秒后重新加载整个页面数据
+//       setTimeout(() => {
+//         location.reload()
+//       }, 1000)
+      
+//     } catch (err) {
+//       ElMessage.error(err.response?.data?.detail || '创建失败')
+//     } finally {
+//       createLoading.value = false
+//     }
+//   })
+// }
+// async function createRecord() {
+//   if (!recordFormRef.value) return
+//   await recordFormRef.value.validate(async valid => {
+//     if (!valid) return
+
+//     console.log('=== 提交前检查 ===')
+//     console.log('diagnosis 值:', newRecord.diagnosis)
+//     console.log('diagnosis 类型:', typeof newRecord.diagnosis)
+//     console.log('diagnosis 是否为数组:', Array.isArray(newRecord.diagnosis))
+
+//     createLoading.value = true
+//     try {
+//       // 将 lab_results 数组转为对象
+//       const labResultsObj = {}
+//       newRecord.lab_results.forEach(item => {
+//         if (item.name && item.value !== undefined && item.value !== null) {
+//           let resultStr = `${item.value}`
+//           if (item.unit) resultStr += ` ${item.unit}`
+//           if (item.flag && item.flag !== 'normal') {
+//             resultStr += ` (${item.flag === 'high' ? '↑' : item.flag === 'low' ? '↓' : item.flag})`
+//           }
+//           labResultsObj[item.name] = resultStr
+//         }
+//       })
+      
+//       const res = await axios.post('/records/create', {
+//         ...newRecord,
+//         admission_date: new Date(newRecord.admission_date).toISOString().split('T')[0],
+//         diagnosis: newRecord.diagnosis,
+//         lab_results: labResultsObj,
+//         prescriptions: newRecord.prescriptions.filter(p => p.drug)
+//       })
+//       ElMessage.success('创建成功：' + res.data.record_id)
+//       showCreateRecord.value = false
+      
+//       // 重置表单
+//       Object.assign(newRecord, {
+//         name: '', gender: 'M', age: 30, id_card: '', department: '',
+//         doctor_id: '', admission_date: new Date(), diagnosis: '',
+//         treatments: [], prescriptions: [], notes: ''
+//       })
+//       newRecord.lab_results = []
+//       newRecord.imaging_reports = ''
+      
+//       await loadRecords()
+//       await loadDeptStats()
+      
+//       setTimeout(() => {
+//         location.reload()
+//       }, 1000)
+      
+//     } catch (err) {
+//       console.error('完整错误:', err.response?.data)
+//       ElMessage.error(err.response?.data?.detail || '创建失败')
+//     } finally {
+//       createLoading.value = false
+//     }
+//   })
+// }
 async function createRecord() {
   if (!recordFormRef.value) return
   await recordFormRef.value.validate(async valid => {
     if (!valid) return
+
+    console.log('=== 提交前检查 ===')
+    console.log('diagnosis 值:', newRecord.diagnosis)
+    console.log('diagnosis 类型:', typeof newRecord.diagnosis)
+    console.log('diagnosis 是否为数组:', Array.isArray(newRecord.diagnosis))
+
     createLoading.value = true
     try {
+      // 将 lab_results 数组转为对象（使用 item.result）
+      const labResultsObj = {}
+      newRecord.lab_results.forEach(item => {
+        if (item.name && item.result !== undefined && item.result !== null && item.result !== '') {
+          let resultStr = `${item.result}`
+          if (item.unit) resultStr += ` ${item.unit}`
+          if (item.flag && item.flag !== 'normal') {
+            resultStr += ` (${item.flag === 'high' ? '↑' : item.flag === 'low' ? '↓' : item.flag})`
+          }
+          labResultsObj[item.name] = resultStr
+        }
+      })
+      
+      // 整理处方数据：备注数组转字符串
+      const prescriptionsData = newRecord.prescriptions
+        .filter(p => p.drug)
+        .map(p => ({
+          drug: p.drug,
+          dosage: p.dose ? `${p.dose}${p.unit} ${p.frequency}` : '',
+          remark: Array.isArray(p.remark) ? p.remark.join('、') : (p.remark || '')
+        }))
+      
       const res = await axios.post('/records/create', {
         ...newRecord,
         admission_date: new Date(newRecord.admission_date).toISOString().split('T')[0],
-        prescriptions: newRecord.prescriptions.filter(p => p.drug)
+        diagnosis: newRecord.diagnosis,
+        lab_results: labResultsObj,
+        prescriptions: prescriptionsData
       })
       ElMessage.success('创建成功：' + res.data.record_id)
       showCreateRecord.value = false
@@ -1572,19 +2359,18 @@ async function createRecord() {
         doctor_id: '', admission_date: new Date(), diagnosis: '',
         treatments: [], prescriptions: [], notes: ''
       })
-      newRecord.lab_results = {}
+      newRecord.lab_results = []
       newRecord.imaging_reports = ''
       
-      // 重新加载病历列表
       await loadRecords()
       await loadDeptStats()
       
-      // ⭐ 延迟1秒后重新加载整个页面数据
       setTimeout(() => {
         location.reload()
       }, 1000)
       
     } catch (err) {
+      console.error('完整错误:', err.response?.data)
       ElMessage.error(err.response?.data?.detail || '创建失败')
     } finally {
       createLoading.value = false
@@ -1593,38 +2379,6 @@ async function createRecord() {
 }
 
 
-// 监听标签页
-watch(() => props.activeTab, (val) => {
-  if (val === 'dashboard' || val === 'dashboard-profile') {
-    if (val === 'dashboard') {
-      loadDeptStats()
-      loadAllRecordsForChart()
-      loadTrendData()
-    }
-    if (val === 'dashboard-profile') {
-      loadDoctorStats()
-      loadUserProfile()
-    }
-  }
-  else if (val === 'records' || val === 'records-stats') {
-    if (val === 'records') {
-      loadRecords()
-    }
-    if (val === 'records-stats') {
-      loadDeptStats()
-    }
-  }
-  else if (val === 'ai-assistant') {
-    // 无需额外操作
-  }
-})
-
-// 监听对话框打开，保存原始数据
-watch(showProfileEdit, (val) => {
-  if (val) {
-    originalProfileForm.value = JSON.parse(JSON.stringify(profileForm.value))
-  }
-})
 
 // 图表自适应
 const resizeChart = () => trendInstance?.resize()
@@ -1637,6 +2391,12 @@ onMounted(() => {
   loadTrendData()
   window.addEventListener('resize', resizeChart)
   loadUserProfile()
+
+  // ⭐ 如果当前是病历统计页面，加载排行榜
+  if (props.activeTab === 'records-stats') {
+    loadDiseaseRanking()
+    loadDrugRanking()
+  }
 })
 
 onUnmounted(() => {
@@ -1688,26 +2448,6 @@ const onDateRangeChange = () => {
 }
 
 // 加载趋势数据
-// async function loadTrendData() {
-//   if (!trendDateRange.value || trendDateRange.value.length !== 2) return
-  
-//   chartLoading.value = true
-//   try {
-//     const params = {
-//       department: userInfo.value.department,
-//       start_date: trendDateRange.value[0].toISOString().split('T')[0],
-//       end_date: trendDateRange.value[1].toISOString().split('T')[0],
-//       unit: trendTimeUnit.value
-//     }
-//     const res = await axios.get(`${BASE_URL}/stats/trend`, { params })
-//     updateChart(res.data)
-//   } catch (err) {
-//     console.error('加载趋势数据失败:', err)
-//     ElMessage.error('加载趋势数据失败')
-//   } finally {
-//     chartLoading.value = false
-//   }
-// }
 async function loadTrendData() {
   console.log('loadTrendData 被调用')
   console.log('trendDateRange:', trendDateRange.value)
@@ -1812,6 +2552,152 @@ function updateChart(data) {
     trendInstance.setOption(option)
   })
 }
+
+// ========== 病历统计模块（疾病排行与药品排行）==========
+const diseaseChart = ref(null)
+const drugChart = ref(null)
+let diseaseChartInstance = null
+let drugChartInstance = null
+const diseaseLoading = ref(false)
+const drugLoading = ref(false)
+
+// 加载疾病排行榜（医生端自动按科室筛选）
+async function loadDiseaseRanking() {
+  diseaseLoading.value = true
+  try {
+    const params = { limit: 10 }
+    // 医生端自动传科室
+    if (userInfo.value.role === 'doctor') {
+      params.department = userInfo.value.department
+    }
+    const res = await axios.get(`${BASE_URL}/stats/disease-ranking`, { params })
+    renderDiseaseChart(res.data)
+  } catch (err) {
+    console.error('加载疾病排行榜失败:', err)
+  } finally {
+    diseaseLoading.value = false
+  }
+}
+
+// 加载药品排行榜（医生端自动按科室筛选）
+async function loadDrugRanking() {
+  drugLoading.value = true
+  try {
+    const params = { limit: 10 }
+    // 医生端自动传科室
+    if (userInfo.value.role === 'doctor') {
+      params.department = userInfo.value.department
+    }
+    const res = await axios.get(`${BASE_URL}/stats/drug-ranking`, { params })
+    renderDrugChart(res.data)
+  } catch (err) {
+    console.error('加载药品排行榜失败:', err)
+  } finally {
+    drugLoading.value = false
+  }
+}
+
+// 渲染疾病排行榜图表
+function renderDiseaseChart(data) {
+  nextTick(() => {
+    if (!diseaseChart.value) return
+    if (diseaseChartInstance) diseaseChartInstance.dispose()
+    
+    diseaseChartInstance = echarts.init(diseaseChart.value)
+    
+    if (!data || data.length === 0) {
+      diseaseChartInstance.setOption({
+        title: { text: '暂无数据', left: 'center', top: 'center', textStyle: { color: '#999' } }
+      })
+      return
+    }
+    
+    const names = data.map(item => item.name)
+    const counts = data.map(item => item.count)
+    
+    diseaseChartInstance.setOption({
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: '{b}<br/>发生次数: {c} 次' },
+      grid: { top: 30, bottom: 30, left: 100, right: 30, containLabel: true },
+      xAxis: { type: 'value', name: '发生次数', nameLocation: 'middle', nameGap: 35 },
+      yAxis: { type: 'category', data: names, axisLabel: { fontSize: 11, overflow: 'break' } },
+      series: [{
+        type: 'bar',
+        data: counts,
+        itemStyle: { color: '#3b82f6', borderRadius: [0, 4, 4, 0] },
+        label: { show: true, position: 'right', formatter: '{c}' }
+      }]
+    })
+  })
+}
+
+// 渲染药品排行榜图表
+function renderDrugChart(data) {
+  nextTick(() => {
+    if (!drugChart.value) return
+    if (drugChartInstance) drugChartInstance.dispose()
+    
+    drugChartInstance = echarts.init(drugChart.value)
+    
+    if (!data || data.length === 0) {
+      drugChartInstance.setOption({
+        title: { text: '暂无数据', left: 'center', top: 'center', textStyle: { color: '#999' } }
+      })
+      return
+    }
+    
+    const names = data.map(item => item.name)
+    const counts = data.map(item => item.count)
+    
+    drugChartInstance.setOption({
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: '{b}<br/>使用次数: {c} 次' },
+      grid: { top: 30, bottom: 30, left: 100, right: 30, containLabel: true },
+      xAxis: { type: 'value', name: '使用次数', nameLocation: 'middle', nameGap: 35 },
+      yAxis: { type: 'category', data: names, axisLabel: { fontSize: 11, overflow: 'break' } },
+      series: [{
+        type: 'bar',
+        data: counts,
+        itemStyle: { color: '#10b981', borderRadius: [0, 4, 4, 0] },
+        label: { show: true, position: 'right', formatter: '{c}' }
+      }]
+    })
+  })
+}
+
+// 监听标签页
+watch(() => props.activeTab, (val) => {
+  if (val === 'dashboard' || val === 'dashboard-profile') {
+    if (val === 'dashboard') {
+      loadDeptStats()
+      loadAllRecordsForChart()
+      loadTrendData()
+    }
+    if (val === 'dashboard-profile') {
+      loadDoctorStats()
+      loadUserProfile()
+    }
+  }
+  else if (val === 'records' || val === 'records-stats') {
+    if (val === 'records') {
+      loadRecords()
+    }
+    if (val === 'records-stats') {
+      loadDeptStats()
+      loadDiseaseRanking()
+      loadDrugRanking()
+    }
+  }
+  else if (val === 'ai-assistant') {
+    // 无需额外操作
+  }
+})
+
+// 监听对话框打开，保存原始数据
+watch(showProfileEdit, (val) => {
+  if (val) {
+    originalProfileForm.value = JSON.parse(JSON.stringify(profileForm.value))
+  }
+})
+
 
 </script>
 
@@ -2546,4 +3432,302 @@ function updateChart(data) {
   margin-top: 8px;
 }
 
+.diagnosis-input-wrapper {
+  width: 100%;
+}
+
+.diagnosis-quick-buttons {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.quick-label {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.diagnosis-tag {
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.diagnosis-tag:hover {
+  background-color: #3b82f6;
+  color: white;
+  border-color: #3b82f6;
+}
+
+.prescription-item {
+  background: #f8fafc;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.prescription-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.prescription-drug {
+  flex: 2;
+  min-width: 150px;
+}
+
+.prescription-dose {
+  flex: 0.8;
+  min-width: 80px;
+}
+
+.prescription-unit {
+  flex: 0.6;
+  min-width: 70px;
+}
+
+.prescription-frequency {
+  flex: 1;
+  min-width: 100px;
+}
+
+.prescription-actions {
+  flex: 0.3;
+  min-width: 40px;
+  text-align: center;
+}
+
+.prescription-remark {
+  margin-top: 10px;
+  padding-left: 10px;
+}
+
+.prescription-add-row {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.lab-item {
+  background: #f8fafc;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.lab-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.lab-name {
+  flex: 2;
+  min-width: 150px;
+}
+
+.lab-value {
+  flex: 0.8;
+  min-width: 80px;
+}
+
+.lab-unit {
+  flex: 0.8;
+  min-width: 90px;
+}
+
+.lab-range {
+  flex: 1;
+  min-width: 100px;
+}
+
+.lab-flag {
+  flex: 0.6;
+  min-width: 80px;
+}
+
+.lab-actions {
+  flex: 0.3;
+  min-width: 40px;
+  text-align: center;
+}
+
+.lab-add-row {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+/* 处方样式 */
+.prescription-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.prescription-card {
+  background: #f8fafc;
+  border-radius: 12px;
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  transition: all 0.2s;
+}
+
+.prescription-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+
+.prescription-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.prescription-number {
+  font-size: 14px;
+  font-weight: 600;
+  color: #3b82f6;
+}
+
+.prescription-row {
+  margin-bottom: 16px;
+}
+
+.prescription-row:last-child {
+  margin-bottom: 0;
+}
+
+.prescription-row.three-col {
+  display: flex;
+  gap: 16px;
+}
+
+.prescription-row.three-col > div {
+  flex: 1;
+}
+
+.prescription-label {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 6px;
+}
+
+.prescription-drug {
+  width: 100%;
+}
+
+.prescription-dose-group,
+.prescription-unit-group,
+.prescription-frequency-group {
+  flex: 1;
+}
+
+.prescription-dose-group .el-input-number {
+  width: 100%;
+}
+
+.prescription-unit-group .el-select,
+.prescription-frequency-group .el-select {
+  width: 100%;
+}
+
+.prescription-remark {
+  width: 100%;
+}
+
+.add-prescription-btn {
+  margin-top: 12px;
+  width: 100%;
+}
+
+/* 检验结果样式 */
+.lab-card {
+  background: #f8fafc;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 1px solid #e2e8f0;
+}
+
+.lab-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.lab-number {
+  font-size: 14px;
+  font-weight: 600;
+  color: #3b82f6;
+}
+
+.lab-row {
+  margin-bottom: 16px;
+}
+
+.lab-row:last-child {
+  margin-bottom: 0;
+}
+
+.lab-row.three-col {
+  display: flex;
+  gap: 16px;
+}
+
+.lab-row.three-col > div {
+  flex: 1;
+}
+
+.lab-label {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 6px;
+}
+
+.lab-name,
+.lab-value {
+  width: 100%;
+}
+
+.lab-add-row {
+  margin-top: 12px;
+}
+
+.lab-add-row .el-button {
+  width: 100%;
+}
+
+.lab-quick-buttons {
+  margin-bottom: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.lab-tag {
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.lab-tag:hover {
+  background-color: #3b82f6;
+  color: white;
+  border-color: #3b82f6;
+}
+.add-lab-btn {
+  margin-top: 12px;
+  width: 100%;
+}
 </style>

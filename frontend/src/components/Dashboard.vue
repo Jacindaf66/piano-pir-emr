@@ -80,7 +80,7 @@
   </el-container>
 </template>
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted} from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { DataBoard, Document, UserFilled, Service } from '@element-plus/icons-vue'
@@ -88,12 +88,21 @@ import DoctorDashboard from './DoctorDashboard.vue'
 import AdminDashboard from './AdminDashboard.vue'
 import axios from 'axios'
 
+
 const router = useRouter()
 const userInfo = ref(JSON.parse(localStorage.getItem('userInfo') || '{}'))
-const activeMenu = ref('dashboard')
+// ⭐ 直接从 localStorage 读取，或者默认 'dashboard'
+const activeMenu = ref(localStorage.getItem('lastActiveTab') || 'dashboard')
+// const activeMenu = ref('dashboard')
+
+// const handleMenuSelect = (index) => {
+//   activeMenu.value = index
+// }
 
 const handleMenuSelect = (index) => {
   activeMenu.value = index
+  // 保存到 localStorage
+  localStorage.setItem('lastActiveTab', index)
 }
 
 const handleLogout = () => {
@@ -109,6 +118,16 @@ const handleLogout = () => {
     router.replace('/login')
   }).catch(() => {})
 }
+
+
+// 在 onMounted 中恢复
+onMounted(() => {
+  const lastTab = localStorage.getItem('lastActiveTab')
+  if (lastTab && lastTab !== 'login') {
+    activeMenu.value = lastTab
+  }
+})
+
 </script>
 <style scoped>
 .dashboard-container {

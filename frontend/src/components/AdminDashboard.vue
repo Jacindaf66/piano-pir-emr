@@ -272,61 +272,118 @@
         </el-card>
       </template>
 
-      <!-- 病历统计视图 -->
-      <template v-if="activeTab === 'records-stats'">
-        <div class="welcome-banner-mini">
-          <h3>病历统计 - 疾病排行与药品分析</h3>
-        </div>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-card shadow="hover">
-              <template #header>疾病排行榜 TOP10</template>
-              <div ref="diseaseChart" style="height: 300px;"></div>
-            </el-card>
-          </el-col>
-          <el-col :span="12">
-            <el-card shadow="hover">
-              <template #header>药品使用排行 TOP10</template>
-              <div ref="drugChart" style="height: 300px;"></div>
-            </el-card>
-          </el-col>
-        </el-row>
-      </template>
+  <!-- 病历统计视图 -->
+<!-- 病历统计视图 -->
+<template v-if="activeTab === 'records-stats'">
+  <div class="welcome-banner-mini">
+    <h3>病历统计 - 疾病排行与药品分析</h3>
+    <div class="dept-filter" style="margin-top: 10px;">
+      <el-select 
+        v-model="rankingDeptFilter" 
+        placeholder="全部科室" 
+        clearable 
+        size="small"
+        style="width: 140px"
+        @change="loadRankingData"
+      >
+        <el-option v-for="dept in departments" :key="dept" :label="dept" :value="dept" />
+      </el-select>
+    </div>
+  </div>
+  
+  <!-- ⭐ 图表容器 -->
+  <el-row :gutter="16">
+    <el-col :span="12">
+      <el-card shadow="hover" v-loading="diseaseLoading">
+        <template #header>疾病排行榜 TOP10</template>
+        <div ref="diseaseChart" style="height: 350px; width: 100%;"></div>
+      </el-card>
+    </el-col>
+    <el-col :span="12">
+      <el-card shadow="hover" v-loading="drugLoading">
+        <template #header>药品使用排行 TOP10</template>
+        <div ref="drugChart" style="height: 350px; width: 100%;"></div>
+      </el-card>
+    </el-col>
+  </el-row>
+</template>
+
+
 
     </template>
 
     <!-- ========== 医生管理（所有子视图） ========== -->
     <template v-if="activeTab === 'doctors' || activeTab === 'doctors-workload'">
       
-      <!-- 医生列表视图 -->
-      <template v-if="activeTab === 'doctors'">
-        <div class="welcome-banner-mini">
-          <h3>医生账号管理</h3>
-        </div>
+<!-- 医生列表视图 -->
+<template v-if="activeTab === 'doctors'">
+  <div class="welcome-banner-mini">
+    <h3>医生账号管理</h3>
+    <div class="filter-bar" style="margin-top: 12px; display: flex; gap: 12px;">
+      <el-select 
+        v-model="doctorDeptFilter" 
+        placeholder="全部科室" 
+        clearable 
+        size="default"
+        style="width: 140px"
+        @change="loadDoctors"
+      >
+        <el-option v-for="dept in departments" :key="dept" :label="dept" :value="dept" />
+      </el-select>
+      <el-input 
+        v-model="doctorSearchKeyword" 
+        placeholder="搜索医生姓名" 
+        clearable 
+        style="width: 200px"
+        prefix-icon="Search"
+        @input="filterDoctors"
+      />
+      <el-button type="primary" @click="showCreateDoctor = true">
+        + 新增医生
+      </el-button>
+    </div>
+  </div>
 
-        <el-card shadow="hover" class="table-card">
-          <template #header>
-            <div class="table-header">
-              <span style="font-weight: 600;">医生账号列表</span>
-              <el-button type="primary" size="small" @click="showCreateDoctor = true">
-                + 新增医生
-              </el-button>
-            </div>
-          </template>
-          <el-table :data="doctors" stripe v-loading="doctorLoading">
-            <el-table-column prop="username" label="账号" width="150" />
-            <el-table-column prop="name" label="姓名" width="120" />
-            <el-table-column prop="department" label="科室" width="120" />
-            <el-table-column prop="role" label="角色" width="100" />
-            <el-table-column label="操作" width="150">
-              <template #default="{ row }">
-                <el-button type="danger" link @click="deleteDoctor(row)">删除</el-button>
-                <el-button type="primary" link @click="resetPassword(row)">重置密码</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-card>
-      </template>
+  <el-card shadow="hover" class="table-card">
+    <el-table :data="filteredDoctors" stripe v-loading="doctorLoading">
+      <el-table-column prop="name" label="姓名" width="120" />
+      <el-table-column prop="department" label="科室" width="120" />
+      <el-table-column prop="title" label="职称" width="120">
+        <template #default="{ row }">
+          <el-tag size="small" type="success">{{ row.title || '主治医师' }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="180" fixed="right">
+        <template #default="{ row }">
+          <el-button type="primary" link size="small" @click="viewDoctorDetailInfo(row)">详情</el-button>
+          <el-button type="danger" link size="small" @click="deleteDoctor(row)">删除</el-button>
+          <el-button type="warning" link size="small" @click="resetPassword(row)">重置密码</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+  </el-card>
+
+  <!-- 医生详情抽屉 -->
+  <el-drawer v-model="showDoctorDetailDrawer" :title="`${selectedDoctorInfo?.name} 医生详情`" size="40%">
+    <div v-if="selectedDoctorInfo">
+      <el-descriptions :column="1" border>
+        <el-descriptions-item label="账号">{{ selectedDoctorInfo.username }}</el-descriptions-item>
+        <el-descriptions-item label="姓名">{{ selectedDoctorInfo.name }}</el-descriptions-item>
+        <el-descriptions-item label="性别">
+          <el-tag :type="selectedDoctorInfo.gender === '男' ? 'primary' : 'danger'" size="small">
+            {{ selectedDoctorInfo.gender || '未设置' }}
+          </el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="科室">{{ selectedDoctorInfo.department }}</el-descriptions-item>
+        <el-descriptions-item label="职称">{{ selectedDoctorInfo.title || '主治医师' }}</el-descriptions-item>
+        <el-descriptions-item label="联系电话">{{ selectedDoctorInfo.phone || '未设置' }}</el-descriptions-item>
+        <el-descriptions-item label="电子邮箱">{{ selectedDoctorInfo.email || '未设置' }}</el-descriptions-item>
+        <el-descriptions-item label="入职日期">{{ selectedDoctorInfo.join_date || '未设置' }}</el-descriptions-item>
+        <el-descriptions-item label="个人简介">{{ selectedDoctorInfo.bio || '暂无' }}</el-descriptions-item>
+      </el-descriptions>
+    </div>
+  </el-drawer>
+</template>
 
       <!-- 医生绩效视图 -->
       <template v-if="activeTab === 'doctors-workload'">
@@ -569,30 +626,6 @@ const goToRecords = () => {
 }
 
 // 加载总体统计
-// async function loadOverallStats() {
-//   try {
-//     const res = await axios.get(`${BASE_URL}/stats/overall`)
-//     const current = res.data
-    
-//     // 获取上月数据
-//     const lastMonthRes = await axios.get(`${BASE_URL}/stats/overall/lastmonth`)
-//     const lastMonth = lastMonthRes.data
-    
-//     // 获取昨日数据
-//     const yesterdayRes = await axios.get(`${BASE_URL}/stats/overall/yesterday`)
-//     const yesterday = yesterdayRes.data
-    
-//     overallStats.value = {
-//       ...current,
-//       total_trend: lastMonth.total_records ? ((current.total_records - lastMonth.total_records) / lastMonth.total_records * 100).toFixed(1) : 0,
-//       doctor_trend: lastMonth.doctor_count ? ((current.doctor_count - lastMonth.doctor_count) / lastMonth.doctor_count * 100).toFixed(1) : 0,
-//       today_trend: yesterday.today_new ? ((current.today_new - yesterday.today_new) / yesterday.today_new * 100).toFixed(1) : 0,
-//       month_trend: lastMonth.month_new ? ((current.month_new - lastMonth.month_new) / lastMonth.month_new * 100).toFixed(1) : 0
-//     }
-//   } catch (err) {
-//     console.error('加载统计失败:', err)
-//   }
-// }
 async function loadOverallStats() {
   try {
     const [res, lastMonthRes, yesterdayRes] = await Promise.all([
@@ -666,13 +699,14 @@ async function loadDoctors() {
   try {
     const res = await axios.get(`${BASE_URL}/users/list`)
     doctors.value = res.data.users
+    // ⭐ 关键：应用筛选，更新 filteredDoctors
+    filterDoctors()
   } catch (err) {
     console.error('加载医生列表失败:', err)
   } finally {
     doctorLoading.value = false
   }
 }
-
 // 创建医生
 async function createDoctor() {
   if (!doctorFormRef.value) return
@@ -684,15 +718,25 @@ async function createDoctor() {
     try {
       await axios.post(`${BASE_URL}/admin/create-user`, {
         username: newDoctor.username,
-        password: newDoctor.password,
+        password: newDoctor.password || '123456',
         name: newDoctor.name,
-        department: newDoctor.department
+        department: newDoctor.department,
+        title: newDoctor.title,
+        phone: newDoctor.phone,
+        email: newDoctor.email,
+        join_date: newDoctor.join_date
       })
       ElMessage.success('医生账号创建成功')
       showCreateDoctor.value = false
-      loadDoctors()
+      // ⭐ 重新加载医生列表，即时刷新
+      await loadDoctors()
       loadOverallStats()
-      Object.assign(newDoctor, { username: '', name: '', password: '', department: '' })
+      // 重置表单
+      Object.assign(newDoctor, {
+        username: '', name: '', password: '', department: '',
+        title: '主治医师', phone: '', email: '',
+        join_date: new Date().toISOString().split('T')[0]
+      })
     } catch (err) {
       ElMessage.error(err.response?.data?.detail || '创建失败')
     } finally {
@@ -711,7 +755,9 @@ async function deleteDoctor(row) {
     try {
       await axios.delete(`${BASE_URL}/admin/delete-user/${row.id}`)
       ElMessage.success('删除成功')
-      loadDoctors()
+      // ⭐ 重新加载医生列表，即时刷新
+      await loadDoctors()
+      // 同时刷新总体统计（医生总数会变化）
       loadOverallStats()
     } catch (err) {
       ElMessage.error('删除失败')
@@ -731,6 +777,7 @@ async function resetPassword(row) {
     try {
       await axios.post(`${BASE_URL}/admin/reset-password/${row.id}`, { password: value })
       ElMessage.success('密码重置成功')
+      // 不需要刷新列表，但可以加个提示
     } catch (err) {
       ElMessage.error('重置失败')
     }
@@ -969,13 +1016,20 @@ onMounted(() => {
   initWorkloadDateRange()
   loadYoYComparison()
   initAvailableYears()
+  loadDoctorList()
   window.addEventListener('resize', () => {
     trendInstance?.resize()
     doctorPieInstance?.resize()
     workloadInstance?.resize()
     yoyInstance?.resize()
   })
-  
+
+  // ⭐ 如果当前是病历统计页面，加载排行榜数据
+  if (props.activeTab === 'records-stats') {
+    loadDiseaseRanking()
+    loadDrugRanking()
+  }
+
   // 只有当前是医生管理页面才加载医生图表
   if (props.activeTab === 'doctors') {
     nextTick(() => {
@@ -1833,28 +1887,209 @@ function updateDoctorTrendChart(data) {
   })
 }
 
-// 监听 activeTab 变化
-// watch(() => props.activeTab, (newVal) => {
-//   if (newVal === 'dashboard') {
-//     loadRecords()
-//     loadOverallStats()
-//     loadDeptStats()
-//     loadYoYComparison()
-//     loadTrendData()
-//   }
-//   if (newVal === 'records') {
-//     loadRecords()
-//   }
-//   if (newVal === 'doctors') {
-//     loadDoctors()
-//     // 延迟一下加载图表，确保 DOM 已渲染
-//     setTimeout(() => {
-//       loadDoctorDistribution()
-//       loadWorkloadRanking()
-//     }, 100)
-//   }
-// })
+// ========== 病历统计模块（疾病排行与药品排行）==========
+const diseaseChart = ref(null)
+const drugChart = ref(null)
+let diseaseChartInstance = null
+let drugChartInstance = null
+const diseaseLoading = ref(false)
+const drugLoading = ref(false)
 
+// 病历统计页面的科室筛选
+const rankingDeptFilter = ref('')  
+
+// 刷新排行榜数据（科室筛选变化时调用）
+const loadRankingData = () => {
+  loadDiseaseRanking()
+  loadDrugRanking()
+}
+
+// 加载疾病排行榜
+async function loadDiseaseRanking() {
+  diseaseLoading.value = true
+  try {
+    const params = { limit: 10 }
+    // 如果有科室筛选，传科室参数
+    if (rankingDeptFilter.value) {
+      params.department = rankingDeptFilter.value
+    }
+    const res = await axios.get(`${BASE_URL}/stats/disease-ranking`, { params })
+    renderDiseaseChart(res.data)
+  } catch (err) {
+    console.error('加载疾病排行榜失败:', err)
+  } finally {
+    diseaseLoading.value = false
+  }
+}
+
+// 加载药品排行榜
+async function loadDrugRanking() {
+  drugLoading.value = true
+  try {
+    const params = { limit: 10 }
+    // 如果有科室筛选，传科室参数
+    if (rankingDeptFilter.value) {
+      params.department = rankingDeptFilter.value
+    }
+    const res = await axios.get(`${BASE_URL}/stats/drug-ranking`, { params })
+    renderDrugChart(res.data)
+  } catch (err) {
+    console.error('加载药品排行榜失败:', err)
+  } finally {
+    drugLoading.value = false
+  }
+}
+
+// 渲染疾病排行榜图表
+function renderDiseaseChart(data) {
+  nextTick(() => {
+    setTimeout(() => {
+      if (!diseaseChart.value) {
+        console.log('diseaseChart 元素不存在')
+        return
+      }
+      if (diseaseChartInstance) diseaseChartInstance.dispose()
+      
+      // 检查容器尺寸
+      const width = diseaseChart.value.clientWidth
+      const height = diseaseChart.value.clientHeight
+      console.log('diseaseChart 尺寸:', width, height)
+      
+      if (width === 0 || height === 0) {
+        console.log('容器尺寸为0，延迟重试')
+        setTimeout(() => renderDiseaseChart(data), 100)
+        return
+      }
+      
+      diseaseChartInstance = echarts.init(diseaseChart.value)
+      
+      if (!data || data.length === 0) {
+        diseaseChartInstance.setOption({
+          title: { text: '暂无数据', left: 'center', top: 'center', textStyle: { color: '#999' } }
+        })
+        return
+      }
+      
+      const names = data.map(item => item.name)
+      const counts = data.map(item => item.count)
+      
+      diseaseChartInstance.setOption({
+        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: '{b}<br/>发生次数: {c} 次' },
+        grid: { top: 30, bottom: 30, left: 100, right: 30, containLabel: true },
+        xAxis: { type: 'value', name: '发生次数', nameLocation: 'middle', nameGap: 35 },
+        yAxis: { type: 'category', data: names, axisLabel: { fontSize: 11, overflow: 'break' } },
+        series: [{
+          type: 'bar',
+          data: counts,
+          itemStyle: { color: '#3b82f6', borderRadius: [0, 4, 4, 0] },
+          label: { show: true, position: 'right', formatter: '{c}' }
+        }]
+      })
+    }, 100)
+  })
+}
+
+// 渲染药品排行榜图表
+function renderDrugChart(data) {
+  nextTick(() => {
+    setTimeout(() => {
+      if (!drugChart.value) {
+        console.log('drugChart 元素不存在')
+        return
+      }
+      if (drugChartInstance) drugChartInstance.dispose()
+      
+      // 检查容器尺寸
+      const width = drugChart.value.clientWidth
+      const height = drugChart.value.clientHeight
+      console.log('drugChart 尺寸:', width, height)
+      
+      if (width === 0 || height === 0) {
+        console.log('容器尺寸为0，延迟重试')
+        setTimeout(() => renderDrugChart(data), 100)
+        return
+      }
+      
+      drugChartInstance = echarts.init(drugChart.value)
+      
+      if (!data || data.length === 0) {
+        drugChartInstance.setOption({
+          title: { text: '暂无数据', left: 'center', top: 'center', textStyle: { color: '#999' } }
+        })
+        return
+      }
+      
+      const names = data.map(item => item.name)
+      const counts = data.map(item => item.count)
+      
+      drugChartInstance.setOption({
+        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: '{b}<br/>使用次数: {c} 次' },
+        grid: { top: 30, bottom: 30, left: 100, right: 30, containLabel: true },
+        xAxis: { type: 'value', name: '使用次数', nameLocation: 'middle', nameGap: 35 },
+        yAxis: { type: 'category', data: names, axisLabel: { fontSize: 11, overflow: 'break' } },
+        series: [{
+          type: 'bar',
+          data: counts,
+          itemStyle: { color: '#10b981', borderRadius: [0, 4, 4, 0] },
+          label: { show: true, position: 'right', formatter: '{c}' }
+        }]
+      })
+    }, 100)
+  })
+}
+
+
+// 医生列表筛选
+const doctorDeptFilter = ref('')
+const doctorSearchKeyword = ref('')
+const filteredDoctors = ref([])
+
+// 医生详情抽屉
+const showDoctorDetailDrawer = ref(false)
+const selectedDoctorInfo = ref(null)
+
+// 监听筛选变化
+watch([doctorDeptFilter, doctorSearchKeyword], () => {
+  filterDoctors()
+})
+
+// 筛选医生
+const filterDoctors = () => {
+  let filtered = [...doctors.value]
+  
+  if (doctorDeptFilter.value) {
+    filtered = filtered.filter(d => d.department === doctorDeptFilter.value)
+  }
+  
+  if (doctorSearchKeyword.value) {
+    const keyword = doctorSearchKeyword.value.toLowerCase()
+    filtered = filtered.filter(d => d.name.toLowerCase().includes(keyword))
+  }
+  
+  filteredDoctors.value = filtered
+}
+
+// 查看医生详情
+const viewDoctorDetailInfo = (doctor) => {
+  selectedDoctorInfo.value = doctor
+  showDoctorDetailDrawer.value = true
+}
+
+// 加载医生列表时同时更新 filteredDoctors
+async function loadDoctorList() {
+  doctorLoading.value = true
+  try {
+    const res = await axios.get(`${BASE_URL}/users/list`)
+    doctors.value = res.data.users
+    filterDoctors()
+  } catch (err) {
+    console.error('加载医生列表失败:', err)
+  } finally {
+    doctorLoading.value = false
+  }
+}
+
+// 监听 activeTab 变化
 watch(() => props.activeTab, (newVal) => {
   // 运营看板子视图
   if (newVal === 'dashboard' || newVal === 'dashboard-doctor' || newVal === 'dashboard-dept' || newVal === 'dashboard-trend') {
@@ -1884,18 +2119,23 @@ watch(() => props.activeTab, (newVal) => {
     }
     if (newVal === 'records-stats') {
       loadDeptStats()
+      loadDiseaseRanking()
+      loadDrugRanking()
     }
   }
   // 医生管理子视图
   else if (newVal === 'doctors' || newVal === 'doctors-workload') {
     if (newVal === 'doctors') {
       loadDoctors()
+      loadDoctorList()
     }
     if (newVal === 'doctors-workload') {
       loadWorkloadRanking()
     }
   }
 })
+
+
 
 
 </script>
