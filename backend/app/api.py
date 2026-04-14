@@ -528,27 +528,6 @@ def get_department_stats_detailed(current_user: User = Depends(get_current_user_
     }
 
 # ============ 用户列表查询（管理员） ============
-# @router.get("/users/list")
-# def get_users_list(current_user: User = Depends(get_current_user_required), db: Session = Depends(get_db)):
-#     """获取所有医生列表（仅管理员）"""
-#     if current_user.role != Role.ADMIN:
-#         raise HTTPException(status_code=403, detail="无权限")
-    
-#     users = db.query(User).filter(User.role == Role.DOCTOR).all()
-    
-#     return {
-#         "total": len(users),
-#         "users": [
-#             {
-#                 "id": u.id,
-#                 "username": u.username,
-#                 "name": u.name,
-#                 "department": u.department,
-#                 "role": u.role.value
-#             }
-#             for u in users
-#         ]
-#     }
 @router.get("/users/list")
 def get_users_list(current_user: User = Depends(get_current_user_required), db: Session = Depends(get_db)):
     """获取所有医生列表（仅管理员）"""
@@ -950,9 +929,6 @@ def get_doctors_list(
     
     return {"doctors": doctors}
 
-# ============ 病历列表查询 ============
-# @router.get("/records/list")
-# def get_records_list(
 #     current_user: User = Depends(get_current_user_required),
 #     limit: int = 100,
 #     offset: int = 0,
@@ -1227,66 +1203,6 @@ def get_piano_tables(current_user: User = Depends(get_current_user_required)):
     return {"primary_table": [], "backup_table": {}, "replacement_entries": {}, "params": {}}
 
 # ============ 科室月度统计 ============
-# @router.get("/stats/department/month")
-# def get_department_stats_month(
-#     current_user: User = Depends(get_current_user_required),
-#     department: str = None
-# ):
-#     """获取上月科室统计"""
-#     import sqlite3
-#     import os
-#     from datetime import datetime, timedelta
-    
-#     BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-#     DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
-    
-#     conn = sqlite3.connect(DB_PATH)
-#     cursor = conn.cursor()
-    
-#     # 计算上月时间范围
-#     today = datetime.now()
-#     first_day_this_month = today.replace(day=1)
-#     last_day_last_month = first_day_this_month - timedelta(days=1)
-#     first_day_last_month = last_day_last_month.replace(day=1)
-    
-#     start = first_day_last_month.strftime("%Y-%m-%d")
-#     end = last_day_last_month.strftime("%Y-%m-%d")
-    
-#     if current_user.role != Role.ADMIN and department:
-#         dept_filter = department
-#     elif current_user.role != Role.ADMIN:
-#         dept_filter = current_user.department
-#     else:
-#         dept_filter = department
-    
-#     if dept_filter:
-#         cursor.execute("""
-#             SELECT 
-#                 COUNT(*) as total,
-#                 SUM(CASE WHEN admission_date >= ? AND admission_date <= ? THEN 1 ELSE 0 END) as month_count,
-#                 SUM(CASE WHEN admission_date = ? THEN 1 ELSE 0 END) as today_count
-#             FROM records 
-#             WHERE department = ?
-#         """, (start, end, today.strftime("%Y-%m-%d"), dept_filter))
-#     else:
-#         cursor.execute("""
-#             SELECT 
-#                 COUNT(*) as total,
-#                 SUM(CASE WHEN admission_date >= ? AND admission_date <= ? THEN 1 ELSE 0 END) as month_count,
-#                 SUM(CASE WHEN admission_date = ? THEN 1 ELSE 0 END) as today_count
-#             FROM records
-#         """, (start, end, today.strftime("%Y-%m-%d")))
-    
-#     row = cursor.fetchone()
-#     conn.close()
-    
-#     return {
-#         "stats": [{
-#             "total": row[0] or 0,
-#             "month": row[1] or 0,
-#             "today": row[2] or 0
-#         }]
-#     }
 @router.get("/stats/department/month")
 def get_department_stats_month(
     current_user: User = Depends(get_current_user_required),
@@ -2092,4 +2008,52 @@ def get_drug_ranking(
         for name, count in sorted_drugs
     ]
 
+# ============ 获取上月科室医生数 ============
+@router.get("/stats/department/doctor-history")
+def get_department_doctor_history(
+    current_user: User = Depends(get_current_user_required),
+    department: str = None
+):
+    """获取指定科室上月末的医生数量（用于环比计算）"""
+    import sqlite3
+    import os
+    from datetime import datetime, timedelta
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # 计算上个月的最后一天
+    today = datetime.now()
+    first_day_this_month = today.replace(day=1)
+    last_day_last_month = first_day_this_month - timedelta(days=1)
+    last_month_end = last_day_last_month.strftime("%Y-%m-%d")
+    
+    # 权限控制
+    if current_user.role != Role.ADMIN:
+        dept_filter = current_user.department
+    else:
+        dept_filter = department
+    
+    if dept_filter:
+        # ⭐ 使用 join_date 统计上月末已入职的医生
+        cursor.execute("""
+            SELECT COUNT(*) FROM users 
+            WHERE role = 'DOCTOR' 
+            AND department = ?
+            AND (join_date <= ? OR join_date IS NULL)
+        """, (dept_filter, last_month_end))
+    else:
+        cursor.execute("""
+            SELECT COUNT(*) FROM users 
+            WHERE role = 'DOCTOR'
+            AND (join_date <= ? OR join_date IS NULL)
+        """, (last_month_end,))
+    
+    count = cursor.fetchone()[0] or 0
+    conn.close()
+    
+    return {"doctor_count": count, "month": last_day_last_month.strftime("%Y-%m")}
 #

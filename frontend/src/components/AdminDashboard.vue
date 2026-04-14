@@ -1661,11 +1661,11 @@ async function loadDeptStatsData() {
     const statsRes = await axios.get(`${BASE_URL}/stats/department`)
     const deptStat = statsRes.data.stats?.find(s => s.department === selectedDeptForStats.value) || {}
     
-    // 2. 获取科室医生数
+    // 2. 获取当前科室医生数
     const doctorsRes = await axios.get(`${BASE_URL}/doctors/list`, {
       params: { department: selectedDeptForStats.value }
     })
-    const doctorCount = doctorsRes.data.doctors?.length || 0
+    const currentDoctorCount = doctorsRes.data.doctors?.length || 0
     
     // 3. 获取上月数据（用于总数和本月新增环比）
     let lastMonthTotal = 0
@@ -1692,9 +1692,22 @@ async function loadDeptStatsData() {
       console.warn('获取昨日数据失败:', err)
     }
     
-    // 5. 计算环比
+    // 5. ⭐ 获取上月医生数（用于医生环比）
+    let lastMonthDoctorCount = currentDoctorCount
+    try {
+      const historyRes = await axios.get(`${BASE_URL}/stats/department/doctor-history`, {
+        params: { department: selectedDeptForStats.value }
+      })
+      lastMonthDoctorCount = historyRes.data.doctor_count || currentDoctorCount
+      console.log('上月医生数:', lastMonthDoctorCount, '当前医生数:', currentDoctorCount)
+    } catch (err) {
+      console.warn('获取上月医生数失败:', err)
+    }
+    
+    // 6. 计算环比
     const totalTrend = lastMonthTotal ? ((deptStat.total - lastMonthTotal) / lastMonthTotal * 100).toFixed(1) : 0
     const monthTrend = lastMonthNew ? ((deptStat.month - lastMonthNew) / lastMonthNew * 100).toFixed(1) : 0
+    const doctorTrend = lastMonthDoctorCount ? ((currentDoctorCount - lastMonthDoctorCount) / lastMonthDoctorCount * 100).toFixed(1) : 0
     
     // 今日环比特殊处理（昨日为0的情况）
     let todayTrend = 0
@@ -1706,11 +1719,11 @@ async function loadDeptStatsData() {
     
     deptStatsData.value = {
       total: deptStat.total || 0,
-      doctor_count: doctorCount,
+      doctor_count: currentDoctorCount,
       today_new: deptStat.today || 0,
       month_new: deptStat.month || 0,
       totalTrend: parseFloat(totalTrend),
-      doctor_trend: 0,
+      doctor_trend: parseFloat(doctorTrend),
       today_trend: parseFloat(todayTrend),
       month_trend: parseFloat(monthTrend)
     }
@@ -1718,6 +1731,16 @@ async function loadDeptStatsData() {
     console.log('科室统计数据:', deptStatsData.value)
   } catch (err) {
     console.error('加载科室统计数据失败:', err)
+    deptStatsData.value = {
+      total: 0,
+      doctor_count: 0,
+      today_new: 0,
+      month_new: 0,
+      totalTrend: 0,
+      doctor_trend: 0,
+      today_trend: 0,
+      month_trend: 0
+    }
   }
 }
 
