@@ -664,26 +664,21 @@ const goToRecords = () => {
 // 加载总体统计
 async function loadOverallStats() {
   try {
-    const [res, lastMonthRes, yesterdayRes] = await Promise.all([
-      axios.get(`${BASE_URL}/stats/overall`),
-      axios.get(`${BASE_URL}/stats/overall/lastmonth`),
-      axios.get(`${BASE_URL}/stats/overall/yesterday`)
-    ])
-    
-    const current = res.data
-    const lastMonth = lastMonthRes.data
-    const yesterday = yesterdayRes.data
+    const res = await axios.get(`${BASE_URL}/stats/overall`)
+    const data = res.data
     
     overallStats.value = {
-      total_records: current.total_records,
-      doctor_count: current.doctor_count,
-      month_new: current.month_new,
-      today_new: yesterday.today_new,  // ← 关键修复
-      total_trend: lastMonth.total_records ? ((current.total_records - lastMonth.total_records) / lastMonth.total_records * 100).toFixed(1) : 0,
-      doctor_trend: lastMonth.doctor_count ? ((current.doctor_count - lastMonth.doctor_count) / lastMonth.doctor_count * 100).toFixed(1) : 0,
-      today_trend: yesterday.today_new ? ((yesterday.today_new - yesterday.today_new) / yesterday.today_new * 100).toFixed(1) : 0,
-      month_trend: lastMonth.month_new ? ((current.month_new - lastMonth.month_new) / lastMonth.month_new * 100).toFixed(1) : 0
+      total_records: data.total_records,
+      doctor_count: data.doctor_count,
+      today_new: data.today_new,
+      month_new: data.month_new,
+      total_trend: data.total_trend,
+      doctor_trend: data.doctor_trend,
+      today_trend: data.today_trend,
+      month_trend: data.month_trend
     }
+    
+    console.log('总体统计已更新:', overallStats.value)
   } catch (err) {
     console.error('加载统计失败:', err)
   }
@@ -760,7 +755,7 @@ async function createDoctor() {
         title: newDoctor.title,
         phone: newDoctor.phone,
         email: newDoctor.email,
-        join_date: newDoctor.join_date
+        join_date: newDoctor.join_date || new Date().toISOString().split('T')[0] 
       })
       ElMessage.success('医生账号创建成功')
       showCreateDoctor.value = false
@@ -2164,6 +2159,7 @@ watch(() => props.activeTab, (newVal) => {
     }
     if (newVal === 'dashboard-doctor') {
       loadWorkloadRanking()
+      loadDoctorDistribution()
     }
     if (newVal === 'dashboard-dept') {
       loadDeptStats()

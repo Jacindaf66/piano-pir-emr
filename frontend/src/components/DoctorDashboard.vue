@@ -418,26 +418,111 @@
         </el-card>
       </template>
 
-      <!-- 病历统计视图 -->
-      <template v-if="activeTab === 'records-stats'">
-        <div class="welcome-banner-mini">
-          <h3>{{ userInfo.department }}病历统计 - 疾病排行与药品分析</h3>
+<!-- 病历统计视图 -->
+<template v-if="activeTab === 'records-stats'">
+  <div class="welcome-banner-mini">
+    <h3>科室病历统计 - 疾病排行与药品分析</h3>
+    <p style="margin-top: 8px; font-size: 13px;">科室：{{ userInfo.department }}</p>
+  </div>
+
+  <!-- 第一行：疾病排行 + 药品排行 -->
+  <el-row :gutter="16">
+    <el-col :span="12">
+      <el-card shadow="hover" v-loading="diseaseLoading" class="stats-card">
+        <template #header>
+          <div class="card-header">
+            <el-icon><DataLine /></el-icon>
+            <span>疾病排行榜 TOP10</span>
+          </div>
+        </template>
+        <div ref="diseaseChart" style="height: 320px;"></div>
+      </el-card>
+    </el-col>
+    <el-col :span="12">
+      <el-card shadow="hover" v-loading="drugLoading" class="stats-card">
+        <template #header>
+          <div class="card-header">
+            <el-icon><Medicine /></el-icon>
+            <span>药品使用排行 TOP10</span>
+          </div>
+        </template>
+        <div ref="drugChart" style="height: 320px;"></div>
+      </el-card>
+    </el-col>
+  </el-row>
+
+  <!-- 第二行：患者画像 -->
+  <el-row :gutter="16" style="margin-top: 16px;">
+    <el-col :span="24">
+      <el-card shadow="hover" v-loading="profileLoading" class="stats-card">
+        <template #header>
+          <div class="card-header">
+            <el-icon><User /></el-icon>
+            <span>患者画像</span>
+          </div>
+        </template>
+        <div class="patient-profile">
+          <div class="profile-section">
+            <div class="section-title">年龄分布</div>
+            <div class="age-bars">
+              <div v-for="item in ageDistribution" :key="item.range" class="age-item">
+                <span class="age-label">{{ item.range }}</span>
+                <div class="age-bar">
+                  <div class="age-bar-fill" :style="{ width: item.percentage + '%' }"></div>
+                </div>
+                <span class="age-percent">{{ item.percentage }}%</span>
+                <span class="age-count">({{ item.count }}人)</span>
+              </div>
+            </div>
+          </div>
+          <div class="profile-section">
+            <div class="section-title">性别分布</div>
+            <div class="gender-chart">
+              <div class="gender-item male">
+                <span class="gender-label">男</span>
+                <div class="gender-bar" :style="{ width: malePercentage + '%' }"></div>
+                <span class="gender-value">{{ malePercentage }}% ({{ maleCount }})</span>
+              </div>
+              <div class="gender-item female">
+                <span class="gender-label">女</span>
+                <div class="gender-bar" :style="{ width: femalePercentage + '%' }"></div>
+                <span class="gender-value">{{ femalePercentage }}% ({{ femaleCount }})</span>
+              </div>
+            </div>
+          </div>
         </div>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-card shadow="hover">
-              <template #header>疾病排行榜 TOP10</template>
-              <div ref="diseaseChart" style="height: 300px;"></div>
-            </el-card>
-          </el-col>
-          <el-col :span="12">
-            <el-card shadow="hover">
-              <template #header>药品使用排行 TOP10</template>
-              <div ref="drugChart" style="height: 300px;"></div>
-            </el-card>
-          </el-col>
-        </el-row>
+      </el-card>
+    </el-col>
+  </el-row>
+
+<!-- 第三行：AI 科室综合分析 -->
+<el-row :gutter="16" style="margin-top: 16px;">
+  <el-col :span="24">
+    <el-card shadow="hover" class="ai-insight-card">
+      <template #header>
+        <div class="insight-header">
+          <div class="header-left">
+            <el-icon><MagicStick /></el-icon>
+            <span>科室综合分析</span>
+          </div>
+          <el-button type="primary" link size="small" @click="refreshDeptAnalysis" :loading="deptAnalysisLoading">
+            <el-icon><Refresh /></el-icon>
+            刷新分析
+          </el-button>
+        </div>
       </template>
+      <div class="insight-content" v-loading="deptAnalysisLoading">
+        <div class="insight-text" v-html="renderedDeptAnalysis">
+    </div>
+        <div class="insight-tip">
+          <el-icon><InfoFilled /></el-icon>
+          <span>基于AI大数据分析，仅供参考</span>
+        </div>
+      </div>
+    </el-card>
+  </el-col>
+</el-row>
+</template>
 
     </template>
 
@@ -484,17 +569,62 @@
           </div>
         </div>
         
-        <div class="quick-inputs">
-          <span class="quick-label">快捷输入：</span>
-          <el-tag 
-            v-for="tag in quickTags" 
-            :key="tag"
-            size="small"
-            @click="addQuickInput(tag)"
-          >
-            {{ tag }}
-          </el-tag>
-        </div>
+<div class="quick-inputs">
+  <div class="quick-header">
+    <span class="quick-label">快捷输入：</span>
+    <el-button type="primary" link size="small" @click="showAddTemplateDialog = true">
+      <el-icon><Plus /></el-icon>
+      添加模板
+    </el-button>
+  </div>
+  <div class="quick-tags">
+    <el-tag 
+      v-for="tag in quickTags" 
+      :key="tag"
+      size="small"
+      class="quick-tag"
+      @click="appendToInput(tag)"
+    >
+      {{ tag }}
+    </el-tag>
+  </div>
+  <div class="custom-tags" v-if="customTemplates.length > 0">
+    <span class="custom-label">我的模板：</span>
+    <el-tag
+      v-for="tag in customTemplates"
+      :key="tag.id"
+      size="small"
+      type="success"
+      class="quick-tag"
+      @click="appendToInput(tag.content)"
+      closable
+      @close="deleteCustomTemplate(tag.id)"
+    >
+      {{ tag.name }}
+    </el-tag>
+  </div>
+</div>
+
+<!-- 添加模板对话框 -->
+<el-dialog v-model="showAddTemplateDialog" title="添加快捷模板" width="400px">
+  <el-form :model="newTemplate" label-width="80px">
+    <el-form-item label="模板名称">
+      <el-input v-model="newTemplate.name" placeholder="如：感冒症状" maxlength="20" />
+    </el-form-item>
+    <el-form-item label="模板内容">
+      <el-input
+        v-model="newTemplate.content"
+        type="textarea"
+        :rows="3"
+        placeholder="输入常用的问诊描述..."
+      />
+    </el-form-item>
+  </el-form>
+  <template #footer>
+    <el-button @click="showAddTemplateDialog = false">取消</el-button>
+    <el-button type="primary" @click="addCustomTemplate">添加</el-button>
+  </template>
+</el-dialog>
         
         <div class="chat-input">
           <el-input
@@ -906,10 +1036,10 @@ import axios from 'axios'
 import * as echarts from 'echarts'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { 
-  Plus, MagicStick, ChatDotRound, CopyDocument, Document,
-  Service, Promotion, UserFilled, Delete, User, OfficeBuilding, Message,
-  Check, Calendar, Sunrise, TrendCharts, List, ArrowRight, Trophy,
-  Camera, Edit, Upload, Refresh, InfoFilled
+  Plus, MagicStick, 
+  Service, Promotion, UserFilled, Delete, User,
+  Calendar, Sunrise, TrendCharts, List, ArrowRight, Trophy,
+   Edit, Upload, Refresh, InfoFilled, DataLine, 
 } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 
@@ -954,6 +1084,52 @@ const quickTags = [
   '糖尿病患者，血糖空腹12.8',
   '患者乏力、消瘦1个月'
 ]
+
+// 自定义模板
+const customTemplates = ref([])
+const showAddTemplateDialog = ref(false)
+const newTemplate = ref({ name: '', content: '' })
+
+// 追加到输入框（不替换，可连续添加）
+const appendToInput = (content) => {
+  if (aiInput.value) {
+    // 已有内容，追加（加空格或换行）
+    aiInput.value = aiInput.value + '\n' + content
+  } else {
+    aiInput.value = content
+  }
+}
+
+// 添加自定义模板
+const addCustomTemplate = () => {
+  if (!newTemplate.value.name || !newTemplate.value.content) {
+    ElMessage.warning('请填写模板名称和内容')
+    return
+  }
+  customTemplates.value.push({
+    id: Date.now(),
+    name: newTemplate.value.name,
+    content: newTemplate.value.content
+  })
+  localStorage.setItem('aiCustomTemplates', JSON.stringify(customTemplates.value))
+  showAddTemplateDialog.value = false
+  newTemplate.value = { name: '', content: '' }
+  ElMessage.success('模板添加成功')
+}
+
+// 删除自定义模板
+const deleteCustomTemplate = (id) => {
+  customTemplates.value = customTemplates.value.filter(t => t.id !== id)
+  localStorage.setItem('aiCustomTemplates', JSON.stringify(customTemplates.value))
+}
+
+// 加载保存的自定义模板
+const loadCustomTemplates = () => {
+  const saved = localStorage.getItem('aiCustomTemplates')
+  if (saved) {
+    customTemplates.value = JSON.parse(saved)
+  }
+}
 
 const emit = defineEmits(['menu-change'])
 
@@ -2230,113 +2406,6 @@ async function onDepartmentChange(dept) {
 }
 
 //创建病历
-// async function createRecord() {
-//   if (!recordFormRef.value) return
-//   await recordFormRef.value.validate(async valid => {
-//     if (!valid) return
-
-//     // ⭐ 添加日志
-//     console.log('=== 提交前检查 ===')
-//     console.log('diagnosis 值:', newRecord.diagnosis)
-//     console.log('diagnosis 类型:', typeof newRecord.diagnosis)
-//     console.log('diagnosis 是否为数组:', Array.isArray(newRecord.diagnosis))
-
-//     createLoading.value = true
-//     try {
-//       const res = await axios.post('/records/create', {
-//         ...newRecord,
-//         admission_date: new Date(newRecord.admission_date).toISOString().split('T')[0],
-//         diagnosis: newRecord.diagnosis,
-//         lab_results: labResultsObj,
-//         prescriptions: newRecord.prescriptions.filter(p => p.drug)
-//       })
-//       ElMessage.success('创建成功：' + res.data.record_id)
-//       showCreateRecord.value = false
-      
-//       // 重置表单
-//       Object.assign(newRecord, {
-//         name: '', gender: 'M', age: 30, id_card: '', department: '',
-//         doctor_id: '', admission_date: new Date(), diagnosis: '',
-//         treatments: [], prescriptions: [], notes: ''
-//       })
-//       newRecord.lab_results = []
-//       newRecord.imaging_reports = ''
-      
-//       // 重新加载病历列表
-//       await loadRecords()
-//       await loadDeptStats()
-      
-//       // ⭐ 延迟1秒后重新加载整个页面数据
-//       setTimeout(() => {
-//         location.reload()
-//       }, 1000)
-      
-//     } catch (err) {
-//       ElMessage.error(err.response?.data?.detail || '创建失败')
-//     } finally {
-//       createLoading.value = false
-//     }
-//   })
-// }
-// async function createRecord() {
-//   if (!recordFormRef.value) return
-//   await recordFormRef.value.validate(async valid => {
-//     if (!valid) return
-
-//     console.log('=== 提交前检查 ===')
-//     console.log('diagnosis 值:', newRecord.diagnosis)
-//     console.log('diagnosis 类型:', typeof newRecord.diagnosis)
-//     console.log('diagnosis 是否为数组:', Array.isArray(newRecord.diagnosis))
-
-//     createLoading.value = true
-//     try {
-//       // 将 lab_results 数组转为对象
-//       const labResultsObj = {}
-//       newRecord.lab_results.forEach(item => {
-//         if (item.name && item.value !== undefined && item.value !== null) {
-//           let resultStr = `${item.value}`
-//           if (item.unit) resultStr += ` ${item.unit}`
-//           if (item.flag && item.flag !== 'normal') {
-//             resultStr += ` (${item.flag === 'high' ? '↑' : item.flag === 'low' ? '↓' : item.flag})`
-//           }
-//           labResultsObj[item.name] = resultStr
-//         }
-//       })
-      
-//       const res = await axios.post('/records/create', {
-//         ...newRecord,
-//         admission_date: new Date(newRecord.admission_date).toISOString().split('T')[0],
-//         diagnosis: newRecord.diagnosis,
-//         lab_results: labResultsObj,
-//         prescriptions: newRecord.prescriptions.filter(p => p.drug)
-//       })
-//       ElMessage.success('创建成功：' + res.data.record_id)
-//       showCreateRecord.value = false
-      
-//       // 重置表单
-//       Object.assign(newRecord, {
-//         name: '', gender: 'M', age: 30, id_card: '', department: '',
-//         doctor_id: '', admission_date: new Date(), diagnosis: '',
-//         treatments: [], prescriptions: [], notes: ''
-//       })
-//       newRecord.lab_results = []
-//       newRecord.imaging_reports = ''
-      
-//       await loadRecords()
-//       await loadDeptStats()
-      
-//       setTimeout(() => {
-//         location.reload()
-//       }, 1000)
-      
-//     } catch (err) {
-//       console.error('完整错误:', err.response?.data)
-//       ElMessage.error(err.response?.data?.detail || '创建失败')
-//     } finally {
-//       createLoading.value = false
-//     }
-//   })
-// }
 async function createRecord() {
   if (!recordFormRef.value) return
   await recordFormRef.value.validate(async valid => {
@@ -2419,11 +2488,13 @@ onMounted(() => {
   loadTrendData()
   window.addEventListener('resize', resizeChart)
   loadUserProfile()
+  loadCustomTemplates()
 
   // ⭐ 如果当前是病历统计页面，加载排行榜
   if (props.activeTab === 'records-stats') {
     loadDiseaseRanking()
     loadDrugRanking()
+    loadAllStatsData()
   }
 })
 
@@ -2738,6 +2809,90 @@ const refreshAIAnalysis = () => {
   getAIAnalysis()
 }
 
+// 患者画像变量
+const ageDistribution = ref([])
+const maleCount = ref(0)
+const femaleCount = ref(0)
+const malePercentage = ref(0)
+const femalePercentage = ref(0)
+const profileLoading = ref(false)
+
+//患者画像
+async function loadPatientProfile() {
+  console.log('===== loadPatientProfile 开始执行 =====')
+  profileLoading.value = true
+  try {
+    const params = { department: userInfo.value.department }
+    const res = await axios.get(`${BASE_URL}/stats/patient-profile`, { params })
+    console.log('患者画像数据:', res.data)
+    
+    // 年龄分布
+    ageDistribution.value = res.data.age_distribution || []
+    
+    // 性别分布
+    const genderDist = res.data.gender_distribution || []
+    console.log('性别分布详情:', JSON.stringify(genderDist))
+    const male = genderDist.find(g => g.gender === '男')  
+    const female = genderDist.find(g => g.gender === '女') 
+    maleCount.value = male.count
+    femaleCount.value = female.count
+    malePercentage.value = male.percentage
+    femalePercentage.value = female.percentage
+    
+    console.log('年龄分布:', ageDistribution.value)
+    console.log('男性:', malePercentage.value, '%, 女性:', femalePercentage.value, '%')
+  } catch (err) {
+    console.error('加载患者画像失败:', err)
+  } finally {
+    profileLoading.value = false
+  }
+}
+
+
+// AI 科室综合分析
+const deptAnalysisText = ref('')
+const deptAnalysisLoading = ref(false)
+
+
+// 渲染 Markdown 格式的 AI 分析
+const renderedDeptAnalysis = computed(() => {
+  if (!deptAnalysisText.value) return '点击刷新获取AI分析'
+  return marked.parse(deptAnalysisText.value)
+})
+
+// 获取 AI 综合分析
+async function getDeptAIAnalysis() {
+  deptAnalysisLoading.value = true
+  try {
+    const res = await axios.post(`${BASE_URL}/ai/analyze-department`, {
+      department: userInfo.value.department
+    })
+    deptAnalysisText.value = res.data.analysis || '暂无分析数据'
+  } catch (err) {
+    console.error('获取科室AI分析失败:', err)
+    deptAnalysisText.value = 'AI分析服务暂时不可用，请稍后再试'
+  } finally {
+    deptAnalysisLoading.value = false
+  }
+}
+
+// 刷新科室分析
+const refreshDeptAnalysis = () => {
+  getDeptAIAnalysis()
+}
+
+// 加载所有数据
+async function loadAllStatsData() {
+  await Promise.all([
+    loadDiseaseRanking(),
+    loadDrugRanking(),
+    loadPatientProfile(),
+    getAIAnalysis(),
+    getDeptAIAnalysis()
+  ])
+  console.log('loadAllStatsData 结束')
+}
+
 // 监听标签页
 watch(() => props.activeTab, (val) => {
   if (val === 'dashboard' || val === 'dashboard-profile') {
@@ -2759,6 +2914,7 @@ watch(() => props.activeTab, (val) => {
       loadDeptStats()
       loadDiseaseRanking()
       loadDrugRanking()
+      loadAllStatsData()
     }
   }
   else if (val === 'ai-assistant') {
@@ -3846,6 +4002,151 @@ watch(showProfileEdit, (val) => {
 }
 
 .analysis-tip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #94a3b8;
+  padding-top: 8px;
+  border-top: 1px solid #e2e8f0;
+}
+
+/* 患者画像 */
+.patient-profile {
+  display: flex;
+  gap: 40px;
+  flex-wrap: wrap;
+  padding: 8px 0;
+}
+
+.profile-section {
+  flex: 1;
+  min-width: 200px;
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #64748b;
+  margin-bottom: 12px;
+}
+
+.age-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.age-label {
+  width: 70px;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.age-bar {
+  flex: 1;
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.age-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  border-radius: 4px;
+}
+
+.age-percent {
+  width: 45px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #1e293b;
+}
+
+.age-count {
+  width: 60px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.gender-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.gender-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.gender-label {
+  width: 30px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.gender-bar {
+  flex: 1;
+  height: 24px;
+  border-radius: 6px;
+}
+
+.gender-item.male .gender-bar {
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+}
+
+.gender-item.female .gender-bar {
+  background: linear-gradient(90deg, #ec489a, #f472b6);
+}
+
+.gender-value {
+  width: 80px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+/* AI 卡片 */
+.ai-insight-card {
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+}
+
+.insight-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.header-left .el-icon {
+  font-size: 18px;
+  color: #8b5cf6;
+}
+
+.insight-content {
+  line-height: 1.8;
+  color: #334155;
+}
+
+.insight-text {
+  font-size: 14px;
+  margin-bottom: 12px;
+  white-space: pre-wrap;
+}
+
+.insight-tip {
   display: flex;
   align-items: center;
   gap: 6px;

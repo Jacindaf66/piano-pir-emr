@@ -191,6 +191,7 @@ class UserResponse(BaseModel):
     role: str
     department: Optional[str] = None
 
+
 # OAuth2 配置
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login", auto_error=False)
 
@@ -314,6 +315,7 @@ def get_me(current_user: User = Depends(get_current_user_required)):
         department=current_user.department
     )
 
+#创建医生
 @router.post("/admin/create-user")
 def admin_create_user(
     request: RegisterRequest,
@@ -333,7 +335,8 @@ def admin_create_user(
         password=hash_password(request.password),
         name=request.name,
         role=Role.DOCTOR,
-        department=request.department
+        department=request.department,
+        join_date=date.today()
     )
     
     db.add(new_user)
@@ -417,6 +420,49 @@ def doctor_dashboard(current_user: User = Depends(get_current_user_required)):
     }
 
 # ============ 总体统计（管理员） ============
+# @router.get("/stats/overall")
+# def get_overall_stats(current_user: User = Depends(get_current_user_required), db: Session = Depends(get_db)):
+#     """获取总体统计（仅管理员）"""
+#     if current_user.role != Role.ADMIN:
+#         raise HTTPException(status_code=403, detail="无权限")
+    
+#     import sqlite3
+#     import os
+#     from datetime import datetime, timedelta
+    
+#     BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+#     DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+#     conn = sqlite3.connect(DB_PATH)
+#     cursor = conn.cursor()
+    
+#     today = datetime.now().strftime('%Y-%m-%d')
+#     month_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    
+#     # 总病历数
+#     cursor.execute("SELECT COUNT(*) FROM records")
+#     total_records = cursor.fetchone()[0]
+    
+#     # 今日新增
+#     cursor.execute("SELECT COUNT(*) FROM records WHERE admission_date = ?", (today,))
+#     today_new = cursor.fetchone()[0]
+    
+#     # 本月新增
+#     cursor.execute("SELECT COUNT(*) FROM records WHERE admission_date >= ?", (month_ago,))
+#     month_new = cursor.fetchone()[0]
+    
+#     # 医生总数
+#     cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'DOCTOR'")
+#     doctor_count = cursor.fetchone()[0]
+    
+#     conn.close()
+    
+#     return {
+#         "total_records": total_records,
+#         "doctor_count": doctor_count,
+#         "today_new": today_new,
+#         "month_new": month_new
+#     }
 @router.get("/stats/overall")
 def get_overall_stats(current_user: User = Depends(get_current_user_required), db: Session = Depends(get_db)):
     """获取总体统计（仅管理员）"""
@@ -433,32 +479,73 @@ def get_overall_stats(current_user: User = Depends(get_current_user_required), d
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
+    # 计算时间范围
     today = datetime.now().strftime('%Y-%m-%d')
-    month_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
     
-    # 总病历数
+    # 上月时间范围
+    now = datetime.now()
+    first_day_this_month = now.replace(day=1)
+    last_day_last_month = first_day_this_month - timedelta(days=1)
+    first_day_last_month = last_day_last_month.replace(day=1)
+    last_month_start = first_day_last_month.strftime('%Y-%m-%d')
+    last_month_end = last_day_last_month.strftime('%Y-%m-%d')
+    
+    # 1. 总病历数
     cursor.execute("SELECT COUNT(*) FROM records")
     total_records = cursor.fetchone()[0]
     
-    # 今日新增
+    # 2. 今日新增
     cursor.execute("SELECT COUNT(*) FROM records WHERE admission_date = ?", (today,))
     today_new = cursor.fetchone()[0]
     
-    # 本月新增
-    cursor.execute("SELECT COUNT(*) FROM records WHERE admission_date >= ?", (month_ago,))
+    # 3. 昨日新增
+    cursor.execute("SELECT COUNT(*) FROM records WHERE admission_date = ?", (yesterday,))
+    yesterday_new = cursor.fetchone()[0]
+    
+    # 4. 本月新增
+    cursor.execute("SELECT COUNT(*) FROM records WHERE admission_date >= ?", (first_day_this_month.strftime('%Y-%m-%d'),))
     month_new = cursor.fetchone()[0]
     
-    # 医生总数
+    # 5. 上月新增
+    cursor.execute("""
+        SELECT COUNT(*) FROM records 
+        WHERE admission_date >= ? AND admission_date <= ?
+    """, (last_month_start, last_month_end))
+    last_month_new = cursor.fetchone()[0]
+    
+    # 6. 上月总病历数（截止上月底）
+    cursor.execute("SELECT COUNT(*) FROM records WHERE admission_date <= ?", (last_month_end,))
+    last_month_total = cursor.fetchone()[0]
+    
+    # 7. 当前医生总数
     cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'DOCTOR'")
     doctor_count = cursor.fetchone()[0]
     
+    # 8. 上月医生总数（入职日期 <= 上月底）
+    cursor.execute("""
+        SELECT COUNT(*) FROM users 
+        WHERE role = 'DOCTOR' AND (join_date <= ? OR join_date IS NULL)
+    """, (last_month_end,))
+    last_month_doctor_count = cursor.fetchone()[0]
+    
     conn.close()
+    
+    # 计算环比
+    total_trend = ((total_records - last_month_total) / last_month_total * 100) if last_month_total > 0 else 0
+    doctor_trend = ((doctor_count - last_month_doctor_count) / last_month_doctor_count * 100) if last_month_doctor_count > 0 else 0
+    today_trend = ((today_new - yesterday_new) / yesterday_new * 100) if yesterday_new > 0 else (100 if today_new > 0 else 0)
+    month_trend = ((month_new - last_month_new) / last_month_new * 100) if last_month_new > 0 else 0
     
     return {
         "total_records": total_records,
         "doctor_count": doctor_count,
         "today_new": today_new,
-        "month_new": month_new
+        "month_new": month_new,
+        "total_trend": round(total_trend, 1),
+        "doctor_trend": round(doctor_trend, 1),
+        "today_trend": round(today_trend, 1),
+        "month_trend": round(month_trend, 1)
     }
 
 # ============ 科室详细统计 ============
@@ -2016,5 +2103,234 @@ async def analyze_trend(
         print(f"调用AI分析失败: {e}")
         return {"analysis": "AI服务暂时不可用，请稍后再试", "success": False}
 
+# ============ 患者画像分析 ==========
+@router.get("/stats/patient-profile")
+def get_patient_profile(
+    current_user: User = Depends(get_current_user_required),
+    department: str = None
+):
+    """获取患者画像（年龄分布、性别分布）"""
+    import sqlite3
+    import os
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # 权限控制
+    if current_user.role != Role.ADMIN:
+        dept_filter = current_user.department
+    else:
+        dept_filter = department
+    
+    if dept_filter:
+        cursor.execute("""
+            SELECT 
+                SUM(CASE WHEN age < 18 THEN 1 ELSE 0 END) as age_0_18,
+                SUM(CASE WHEN age BETWEEN 18 AND 35 THEN 1 ELSE 0 END) as age_18_35,
+                SUM(CASE WHEN age BETWEEN 36 AND 55 THEN 1 ELSE 0 END) as age_36_55,
+                SUM(CASE WHEN age > 55 THEN 1 ELSE 0 END) as age_55_plus,
+                SUM(CASE WHEN gender = 'M' THEN 1 ELSE 0 END) as male_count,
+                SUM(CASE WHEN gender = 'F' THEN 1 ELSE 0 END) as female_count,
+                COUNT(*) as total
+            FROM records
+            WHERE department = ?
+        """, (dept_filter,))
+    else:
+        cursor.execute("""
+            SELECT 
+                SUM(CASE WHEN age < 18 THEN 1 ELSE 0 END) as age_0_18,
+                SUM(CASE WHEN age BETWEEN 18 AND 35 THEN 1 ELSE 0 END) as age_18_35,
+                SUM(CASE WHEN age BETWEEN 36 AND 55 THEN 1 ELSE 0 END) as age_36_55,
+                SUM(CASE WHEN age > 55 THEN 1 ELSE 0 END) as age_55_plus,
+                SUM(CASE WHEN gender = 'M' THEN 1 ELSE 0 END) as male_count,
+                SUM(CASE WHEN gender = 'F' THEN 1 ELSE 0 END) as female_count,
+                COUNT(*) as total
+            FROM records
+        """)
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    total = row[6] or 1
+    
+    return {
+        "age_distribution": [
+            {"range": "0-18岁", "count": row[0] or 0, "percentage": round((row[0] or 0) / total * 100, 1)},
+            {"range": "19-35岁", "count": row[1] or 0, "percentage": round((row[1] or 0) / total * 100, 1)},
+            {"range": "36-55岁", "count": row[2] or 0, "percentage": round((row[2] or 0) / total * 100, 1)},
+            {"range": "56岁以上", "count": row[3] or 0, "percentage": round((row[3] or 0) / total * 100, 1)}
+        ],
+        "gender_distribution": [
+            {"gender": "男", "count": row[4] or 0, "percentage": round((row[4] or 0) / total * 100, 1)},
+            {"gender": "女", "count": row[5] or 0, "percentage": round((row[5] or 0) / total * 100, 1)}
+        ],
+        "total": total
+    }
 
+# ============ AI 科室综合分析 ==========
+@router.post("/ai/analyze-department")
+async def analyze_department(
+    request: Request,
+    current_user: User = Depends(get_current_user_required)
+):
+    """AI 综合分析科室数据"""
+    import asyncio
+    import requests
+    import sqlite3
+    import os
+    import json
+    
+    body = await request.json()
+    department = body.get('department', '')
+    
+    if not department:
+        return {"analysis": "请选择科室", "success": False}
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # 1. 获取疾病排行榜
+    cursor.execute("""
+        SELECT diagnosis, COUNT(*) as count
+        FROM records
+        WHERE department = ? AND diagnosis IS NOT NULL AND diagnosis != ''
+        GROUP BY diagnosis
+        ORDER BY count DESC
+        LIMIT 10
+    """, (department,))
+    diseases = [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
+    
+    # 2. 获取药品排行榜
+    cursor.execute("""
+        SELECT prescriptions FROM records
+        WHERE department = ? AND prescriptions IS NOT NULL AND prescriptions != '[]'
+    """, (department,))
+    rows = cursor.fetchall()
+    
+    drug_count = {}
+    for row in rows:
+        try:
+            prescriptions = json.loads(row[0])
+            for p in prescriptions:
+                if isinstance(p, dict):
+                    drug_name = p.get('drug', '')
+                    if drug_name:
+                        drug_count[drug_name] = drug_count.get(drug_name, 0) + 1
+        except:
+            continue
+    
+    drugs = sorted(drug_count.items(), key=lambda x: x[1], reverse=True)[:10]
+    drugs = [{"name": name, "count": count} for name, count in drugs]
+    
+    # 3. 获取患者画像
+    cursor.execute("""
+        SELECT 
+            SUM(CASE WHEN age < 18 THEN 1 ELSE 0 END) as age_0_18,
+            SUM(CASE WHEN age BETWEEN 18 AND 35 THEN 1 ELSE 0 END) as age_18_35,
+            SUM(CASE WHEN age BETWEEN 36 AND 55 THEN 1 ELSE 0 END) as age_36_55,
+            SUM(CASE WHEN age > 55 THEN 1 ELSE 0 END) as age_55_plus,
+            SUM(CASE WHEN gender = 'M' THEN 1 ELSE 0 END) as male_count,
+            SUM(CASE WHEN gender = 'F' THEN 1 ELSE 0 END) as female_count,
+            COUNT(*) as total
+        FROM records
+        WHERE department = ?
+    """, (department,))
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    total = row[6] or 1
+    age_distribution = [
+        {"range": "0-18岁", "count": row[0] or 0, "percentage": round((row[0] or 0) / total * 100, 1)},
+        {"range": "19-35岁", "count": row[1] or 0, "percentage": round((row[1] or 0) / total * 100, 1)},
+        {"range": "36-55岁", "count": row[2] or 0, "percentage": round((row[2] or 0) / total * 100, 1)},
+        {"range": "56岁以上", "count": row[3] or 0, "percentage": round((row[3] or 0) / total * 100, 1)}
+    ]
+    male_percentage = round((row[4] or 0) / total * 100, 1)
+    female_percentage = round((row[5] or 0) / total * 100, 1)
+    
+    if not diseases and not drugs:
+        return {"analysis": "数据不足，无法分析", "success": False}
+    
+    # 构建数据摘要
+    disease_text = "\n".join([f"{i+1}. {d['name']}：{d['count']}例" for i, d in enumerate(diseases[:10])])
+    drug_text = "\n".join([f"{i+1}. {d['name']}：{d['count']}次" for i, d in enumerate(drugs[:10])])
+    age_text = "、".join([f"{a['range']}{a['percentage']}%" for a in age_distribution])
+    
+    prompt = f"""请分析{department}的医疗数据，给出详细专业的分析报告（500字左右）：
+
+【疾病排行 TOP10】
+{disease_text}
+
+【药品使用排行 TOP10】
+{drug_text}
+
+【患者画像】
+- 年龄分布：{age_text}
+- 性别分布：男{male_percentage}%，女{female_percentage}%
+
+请从以下维度进行详细分析：
+
+1. **高发疾病分析**
+   - 哪些疾病发病率最高，占比多少
+   - 可能的原因推测
+   - 与去年同期相比的变化趋势
+
+2. **用药规律分析**
+   - 最常用的药品及其适应症
+   - 用药与高发疾病的匹配度
+   - 用药合理性评价
+
+3. **患者群体特征**
+   - 主要患病人群的年龄特点
+   - 性别分布差异及原因
+   - 高危人群特征
+
+4. **管理建议**
+   - 针对高发疾病的预防建议
+   - 用药管理的优化方向
+   - 重点人群的健康干预措施
+   - 科室资源配置建议
+
+请用专业、简洁的语言回答，分点阐述。"""
+
+    try:
+        doubao_api_key = "91be1b79-0621-44a1-a725-a59462602582"
+        doubao_model = "doubao-seed-1-6-250615"
+        
+        def call_doubao():
+            headers = {"Authorization": f"Bearer {doubao_api_key}", "Content-Type": "application/json"}
+            payload = {
+                "model": doubao_model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.7,
+                "max_tokens": 1500
+            }
+            response = requests.post(
+                "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=60
+            )
+            if response.status_code == 200:
+                return response.json()["choices"][0]["message"]["content"]
+            return None
+        
+        loop = asyncio.get_event_loop()
+        analysis = await loop.run_in_executor(None, call_doubao)
+        
+        if analysis:
+            return {"analysis": analysis, "success": True}
+        else:
+            return {"analysis": "AI服务暂时不可用，请稍后再试", "success": False}
+            
+    except Exception as e:
+        print(f"调用AI分析失败: {e}")
+        return {"analysis": "AI服务暂时不可用，请稍后再试", "success": False}
 #
