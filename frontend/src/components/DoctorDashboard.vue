@@ -376,7 +376,7 @@
             新建病历
           </el-button>
         </div>
-
+<!-- 
         <el-card shadow="hover" class="table-card">
           <template #header>
             <div class="table-header">
@@ -415,7 +415,159 @@
               @current-change="loadRecords"
             />
           </div>
-        </el-card>
+        </el-card> -->
+          <el-card shadow="hover" class="table-card">
+  <template #header>
+    <div class="table-header">
+      <span style="font-weight: 600;">病历列表</span>
+      <el-input 
+        v-model="searchKeyword" 
+        placeholder="搜索病历号/患者..." 
+        prefix-icon="Search" 
+        style="width: 240px" 
+        clearable
+        @input="searchRecords"
+      />
+    </div>
+  </template>
+  
+  <el-table :data="records" stripe v-loading="loading">
+    <el-table-column prop="record_id" label="病历号" width="150" />
+    <el-table-column prop="name" label="患者姓名" width="100" />
+    <el-table-column prop="gender" label="性别" width="60" :formatter="(r) => r.gender === 'M' ? '男' : '女'" />
+    <el-table-column prop="age" label="年龄" width="60" />
+    <el-table-column prop="admission_date" label="入院日期" width="120" />
+    <el-table-column prop="diagnosis" label="诊断" show-overflow-tooltip />
+    
+    <!-- 住院状态列（圆点 + 文字） -->
+<el-table-column label="住院状态" width="120" align="center">
+  <template #default="{ row }">
+    <div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+      <span 
+        :style="{ 
+          display: 'inline-block', 
+          width: '14px', 
+          height: '14px', 
+          borderRadius: '50%', 
+          backgroundColor: isDischarged(row) ? '#10b981' : '#ef4444'
+        }"
+      ></span>
+      <span style="font-size: 13px;">{{ isDischarged(row) ? '已出院' : '住院中' }}</span>
+    </div>
+  </template>
+</el-table-column>
+    
+    <!-- 操作列（两个按钮水平居中） -->
+<el-table-column label="操作" width="180" fixed="right" align="center">
+  <template #default="{ row }">
+    <div style="display: flex; gap: 12px; justify-content: center;">
+      <!-- 未出院：显示办理出院 -->
+      <template v-if="!isDischarged(row)">
+        <el-button type="primary" link size="small" style="font-size: 14px;" @click="showDischargeDialog(row)">
+          办理出院
+        </el-button>
+      </template>
+      <!-- 已出院：显示出院小结 -->
+      <template v-else>
+        <el-button type="info" link size="small" style="font-size: 14px;" @click="showDischargeSummary(row)">
+          出院小结
+        </el-button>
+      </template>
+      <el-button type="primary" link size="small" style="font-size: 14px;" @click.stop="viewRecord(row)">
+        查看详情
+      </el-button>
+    </div>
+  </template>
+</el-table-column>
+  </el-table>
+  
+  <div class="pagination">
+    <el-pagination
+      v-model:current-page="currentPage"
+      v-model:page-size="pageSize"
+      :total="total"
+      layout="prev, pager, next, total"
+      background
+      @current-change="loadRecords"
+    />
+  </div>
+</el-card>
+
+<!-- 办理出院对话框 -->
+<el-dialog v-model="dischargeDialogVisible" title="办理出院" width="550px">
+  <el-form>
+    <!-- 快捷模板区域 -->
+    <el-form-item label="快捷模板">
+      <div class="quick-template-area">
+        <!-- 预设模板 -->
+        <div class="template-row">
+          <span class="label">常用：</span>
+          <div class="template-tags">
+            <el-tag
+              v-for="tpl in presetTemplates"
+              :key="tpl"
+              size="small"
+              class="template-tag"
+              @click="appendToSummary(tpl)"
+            >
+              {{ tpl }}
+            </el-tag>
+          </div>
+        </div>
+        <!-- 自定义模板（只存内容，无名称） -->
+        <div v-if="dischargeCustomTemplates.length" class="template-row">
+          <span class="label">我的：</span>
+          <div class="template-tags">
+            <el-tag
+              v-for="(content, idx) in dischargeCustomTemplates"
+              :key="idx"
+              size="small"
+              type="success"
+              class="template-tag"
+              closable
+              @click="appendToSummary(content)"
+              @close="deleteDischargeCustomTemplate(content)"
+            >
+              {{ content.length > 20 ? content.slice(0, 20) + '...' : content }}
+            </el-tag>
+          </div>
+        </div>
+        <!-- 添加自定义模板：只需输入内容 -->
+        <div class="template-add">
+          <el-input
+            v-model="dischargeNewTemplateContent"
+            placeholder="输入模板内容，如：患者病情稳定，准予出院"
+            size="small"
+            style="width: 260px; margin-right: 8px;"
+          />
+          <el-button size="small" @click="addDischargeCustomTemplate">添加</el-button>
+        </div>
+      </div>
+    </el-form-item>
+    <!-- 出院小结输入框 -->
+    <el-form-item label="出院小结">
+      <el-input
+        v-model="dischargeSummary"
+        type="textarea"
+        :rows="5"
+        placeholder="请输入出院小结（可点击上方模板快速添加）"
+      />
+    </el-form-item>
+  </el-form>
+  <template #footer>
+    <el-button @click="dischargeDialogVisible = false">取消</el-button>
+    <el-button type="primary" @click="confirmDischarge" :loading="dischargeLoading">确认出院</el-button>
+  </template>
+</el-dialog>
+
+<!-- 查看出院小结对话框 -->
+<el-dialog v-model="summaryDialogVisible" title="出院小结" width="500px">
+  <div style="white-space: pre-wrap;">{{ dischargeSummaryContent }}</div>
+  <template #footer>
+    <el-button @click="summaryDialogVisible = false">关闭</el-button>
+  </template>
+</el-dialog>
+
       </template>
 
 <!-- 病历统计视图 -->
@@ -2212,7 +2364,7 @@ async function loadRecords() {
     if (searchKeyword.value.trim()) params.search = searchKeyword.value.trim()
     
     const res = await axios.get('/records/list', { params })
-    records.value = res.data.records
+    records.value = [...res.data.records]
     total.value = res.data.total
   } catch (err) {
     console.error('加载病历列表失败:', err)
@@ -2489,6 +2641,7 @@ onMounted(() => {
   window.addEventListener('resize', resizeChart)
   loadUserProfile()
   loadCustomTemplates()
+  loadDischargeCustomTemplates()
 
   // ⭐ 如果当前是病历统计页面，加载排行榜
   if (props.activeTab === 'records-stats') {
@@ -2875,6 +3028,134 @@ async function getDeptAIAnalysis() {
     deptAnalysisLoading.value = false
   }
 }
+
+// ========== 出院管理相关 ==========
+const dischargeDialogVisible = ref(false)
+const dischargeSummary = ref('')
+const dischargeLoading = ref(false)
+const currentDischargeRecord = ref(null)
+
+const summaryDialogVisible = ref(false)
+const dischargeSummaryContent = ref('')
+
+// 预设模板
+const presetTemplates = ref([
+  '病情好转，准予出院',
+  '建议门诊随访',
+  '定期复查',
+  '注意休息，避免劳累',
+  '如有不适及时就诊'
+])
+
+// 出院自定义模板（数组存储内容字符串）
+const dischargeCustomTemplates = ref([])
+const dischargeNewTemplateContent = ref('')
+
+// 加载自定义模板
+const loadDischargeCustomTemplates = () => {
+  const saved = localStorage.getItem('dischargeCustomTemplates')
+  if (saved) {
+    dischargeCustomTemplates.value = JSON.parse(saved)
+  }
+}
+
+// 保存自定义模板
+const saveDischargeCustomTemplates = () => {
+  localStorage.setItem('dischargeCustomTemplates', JSON.stringify(dischargeCustomTemplates.value))
+}
+
+// 添加自定义模板
+const addDischargeCustomTemplate = () => {
+  if (!dischargeNewTemplateContent.value.trim()) {
+    ElMessage.warning('请输入模板内容')
+    return
+  }
+  const content = dischargeNewTemplateContent.value.trim()
+  // 避免重复添加相同内容
+  if (!dischargeCustomTemplates.value.includes(content)) {
+    dischargeCustomTemplates.value.push(content)
+    saveDischargeCustomTemplates()
+  } else {
+    ElMessage.warning('模板已存在')
+  }
+  dischargeNewTemplateContent.value = ''
+  ElMessage.success('模板添加成功')
+}
+
+// 删除自定义模板
+const deleteDischargeCustomTemplate = (content) => {
+  const index = dischargeCustomTemplates.value.indexOf(content)
+  if (index !== -1) {
+    dischargeCustomTemplates.value.splice(index, 1)
+    saveDischargeCustomTemplates()
+  }
+}
+
+// 追加内容到出院小结文本框
+const appendToSummary = (content) => {
+  if (dischargeSummary.value) {
+    dischargeSummary.value += '\n' + content
+  } else {
+    dischargeSummary.value = content
+  }
+}
+
+// 显示办理出院对话框（关键：计算真实 id）
+const showDischargeDialog = (row) => {
+  // 后端返回的 index = id - 1，因此真实 id = index + 1
+  const realId = row.index + 1
+  currentDischargeRecord.value = { ...row, id: realId }
+  dischargeSummary.value = ''
+  dischargeDialogVisible.value = true
+}
+
+// 判断是否已出院：出院日期存在且小于等于今天
+const isDischarged = (row) => {
+  if (!row.discharge_date) return false
+  const dischargeDate = new Date(row.discharge_date)
+  const today = new Date().toISOString().split('T')[0]
+  return row.discharge_date <= today
+}
+
+// 确认出院
+const confirmDischarge = async () => {
+  if (!dischargeSummary.value.trim()) {
+    ElMessage.warning('请填写出院小结')
+    return
+  }
+  dischargeLoading.value = true
+  try {
+    await axios.post(`${BASE_URL}/records/discharge/${currentDischargeRecord.value.id}`, null, {
+      params: { summary: dischargeSummary.value }
+    })
+    ElMessage.success('出院办理成功')
+    dischargeDialogVisible.value = false
+    
+    // 手动更新本地数据（立即生效）
+    const today = new Date().toISOString().split('T')[0]
+    const targetRecord = records.value.find(r => (r.index + 1) === currentDischargeRecord.value.id)
+    if (targetRecord) {
+      targetRecord.discharge_date = today
+      console.log('手动更新成功，新 discharge_date:', targetRecord.discharge_date)
+    }
+    
+  } catch (err) {
+    ElMessage.error(err.response?.data?.detail || '办理失败')
+  } finally {
+    dischargeLoading.value = false
+  }
+}
+
+// 查看出院小结（需要后端返回 discharge_date 和 notes 字段）
+const showDischargeSummary = (row) => {
+  const notes = row.notes || ''
+  const match = notes.match(/【出院小结】(.*?)【出院日期】/s)
+  dischargeSummaryContent.value = match ? match[1].trim() : '无出院小结'
+  summaryDialogVisible.value = true
+}
+
+
+
 
 // 刷新科室分析
 const refreshDeptAnalysis = () => {
@@ -4154,6 +4435,51 @@ watch(showProfileEdit, (val) => {
   color: #94a3b8;
   padding-top: 8px;
   border-top: 1px solid #e2e8f0;
+}
+
+.quick-template-area {
+  background: #f8fafc;
+  padding: 12px;
+  border-radius: 8px;
+}
+
+.template-row {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.template-row .label {
+  width: 50px;
+  font-size: 13px;
+  color: #64748b;
+  margin-top: 4px;
+}
+
+.template-tags {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.template-tag {
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.template-tag:hover {
+  background-color: #3b82f6;
+  color: white;
+  border-color: #3b82f6;
+}
+
+.template-add {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 </style>

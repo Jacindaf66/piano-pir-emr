@@ -1052,7 +1052,7 @@ def get_records_list(
     # 查询数据
     query = f"""
         SELECT id, record_id, name, gender, age, department, 
-               admission_date, diagnosis, doctor_id, doctor_name
+               admission_date, discharge_date, diagnosis, doctor_id, doctor_name
         FROM records{where_clause}
         ORDER BY admission_date DESC, record_id DESC
         LIMIT ? OFFSET ?
@@ -1070,9 +1070,10 @@ def get_records_list(
             "age": row[4],
             "department": row[5],
             "admission_date": row[6],
-            "diagnosis": row[7],
-            "doctor_id": row[8],
-            "doctor_name": row[9]
+            "discharge_date": row[7], 
+            "diagnosis": row[8],
+            "doctor_id": row[9],
+            "doctor_name": row[10]
         })
     
     conn.close()
@@ -2333,4 +2334,47 @@ async def analyze_department(
     except Exception as e:
         print(f"调用AI分析失败: {e}")
         return {"analysis": "AI服务暂时不可用，请稍后再试", "success": False}
+
+# ============医生办理出院 ==========
+@router.post("/records/discharge/{record_id}")
+def discharge_patient(
+    record_id: int,
+    summary: str,
+    current_user: User = Depends(get_current_user_required),
+    db: Session = Depends(get_db)
+):
+    import sqlite3
+    import os
+    from datetime import date
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # 检查病历存在及权限
+    cursor.execute("SELECT department, doctor_id, notes FROM records WHERE id = ?", (record_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="病历不存在")
+    
+    # 权限：医生只能办理自己科室的病历
+    if current_user.role != Role.ADMIN and row[0] != current_user.department:
+        conn.close()
+        raise HTTPException(status_code=403, detail="无权限办理其他科室出院")
+    
+    # ⭐ 删除出院检查，直接更新（无论之前有没有出院日期）
+    
+    today = date.today().isoformat()
+    new_notes = (row[2] or "") + f"\n\n【出院小结】{summary}\n【出院日期】{today}"
+    
+    cursor.execute("UPDATE records SET discharge_date = ?, notes = ? WHERE id = ?",
+                   (today, new_notes, record_id))
+    conn.commit()
+    conn.close()
+    
+    return {"success": True, "message": "已办理出院"}
+
 #
