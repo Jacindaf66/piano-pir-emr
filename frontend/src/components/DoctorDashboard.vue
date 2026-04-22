@@ -376,46 +376,54 @@
             新建病历
           </el-button>
         </div>
-<!-- 
-        <el-card shadow="hover" class="table-card">
-          <template #header>
-            <div class="table-header">
-              <span style="font-weight: 600;">病历列表</span>
-              <el-input 
-                v-model="searchKeyword" 
-                placeholder="搜索病历号/患者..." 
-                prefix-icon="Search" 
-                style="width: 240px" 
-                clearable
-                @input="searchRecords"
-              />
-            </div>
-          </template>
-          <el-table :data="records" stripe v-loading="loading">
-            <el-table-column prop="record_id" label="病历号" width="150" />
-            <el-table-column prop="name" label="患者姓名" width="100" />
-            <el-table-column prop="gender" label="性别" width="60" :formatter="(r) => r.gender === 'M' ? '男' : '女'" />
-            <el-table-column prop="age" label="年龄" width="60" />
-            <el-table-column prop="admission_date" label="入院日期" width="120" />
-            <el-table-column prop="diagnosis" label="诊断" show-overflow-tooltip />
-            <el-table-column label="操作" width="100" fixed="right">
-              <template #default="{ row }">
-                <el-button type="primary" link @click.stop="viewRecord(row)">查看详情</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-          
-          <div class="pagination">
-            <el-pagination
-              v-model:current-page="currentPage"
-              v-model:page-size="pageSize"
-              :total="total"
-              layout="prev, pager, next, total"
-              background
-              @current-change="loadRecords"
-            />
-          </div>
-        </el-card> -->
+
+        <!-- 病历统计看板 -->
+<div class="ward-stats-bar">
+  <div class="stat-card">
+    <div class="stat-header">
+      <span class="stat-icon" style="font-size: 22px;">📋</span>
+      <span class="stat-label" style="font-size: 14px; font-weight: 500;">全部病历</span>
+    </div>
+    <div class="stat-num">{{ wardStats.total }}</div>
+    <div class="stat-change" :class="wardStats.totalChange >= 0 ? 'change-up' : 'change-down'">
+      较昨日 {{ wardStats.totalChange >= 0 ? '↑' : '↓' }} {{ Math.abs(wardStats.totalChange) }}
+    </div>
+  </div>
+  
+  <div class="stat-card">
+    <div class="stat-header">
+      <span class="stat-icon">✅</span>
+      <span class="stat-label">已出院</span>
+    </div>
+    <div class="stat-num">{{ wardStats.discharged }}</div>
+    <div class="stat-change" :class="wardStats.dischargedChange >= 0 ? 'change-up' : 'change-down'">
+      较昨日 {{ wardStats.dischargedChange >= 0 ? '↑' : '↓' }} {{ Math.abs(wardStats.dischargedChange) }}
+    </div>
+  </div>
+  
+  <div class="stat-card">
+    <div class="stat-header">
+      <span class="stat-icon">🛏️</span>
+      <span class="stat-label">住院中</span>
+    </div>
+    <div class="stat-num">{{ wardStats.hospitalized }}</div>
+    <div class="stat-change" :class="wardStats.hospitalizedChange >= 0 ? 'change-up' : 'change-down'">
+      较昨日 {{ wardStats.hospitalizedChange >= 0 ? '↑' : '↓' }} {{ Math.abs(wardStats.hospitalizedChange) }}
+    </div>
+  </div>
+  
+  <div class="stat-card">
+    <div class="stat-header">
+      <span class="stat-icon">📈</span>
+      <span class="stat-label">出院率</span>
+    </div>
+    <div class="stat-num">{{ wardStats.dischargeRate }}%</div>
+    <div class="stat-change" :class="wardStats.rateChange >= 0 ? 'change-up' : 'change-down'">
+      较昨日 {{ wardStats.rateChange >= 0 ? '↑' : '↓' }} {{ Math.abs(wardStats.rateChange) }}%
+    </div>
+  </div>
+</div>
+
           <el-card shadow="hover" class="table-card">
   <template #header>
     <div class="table-header">
@@ -491,7 +499,7 @@
       @current-change="loadRecords"
     />
   </div>
-</el-card>
+         </el-card>
 
 <!-- 办理出院对话框 -->
 <el-dialog v-model="dischargeDialogVisible" title="办理出院" width="550px">
@@ -2642,6 +2650,7 @@ onMounted(() => {
   loadUserProfile()
   loadCustomTemplates()
   loadDischargeCustomTemplates()
+  loadWardStats()
 
   // ⭐ 如果当前是病历统计页面，加载排行榜
   if (props.activeTab === 'records-stats') {
@@ -3172,6 +3181,37 @@ async function loadAllStatsData() {
     getDeptAIAnalysis()
   ])
   console.log('loadAllStatsData 结束')
+}
+
+// ========== 病历统计看板 ==========
+const wardStats = ref({
+  total: 0,
+  discharged: 0,
+  hospitalized: 0,
+  dischargeRate: 0,
+  totalChange: 0,
+  dischargedChange: 0,
+  hospitalizedChange: 0,
+  rateChange: 0
+})
+
+const loadWardStats = async () => {
+  try {
+    const res = await axios.get(`${BASE_URL}/stats/ward-overview`)
+    const data = res.data
+    wardStats.value = {
+      total: data.today.total,
+      discharged: data.today.discharged,
+      hospitalized: data.today.hospitalized,
+      dischargeRate: data.today.discharge_rate,
+      totalChange: data.changes.total,
+      dischargedChange: data.changes.discharged,
+      hospitalizedChange: data.changes.hospitalized,
+      rateChange: data.changes.discharge_rate
+    }
+  } catch (err) {
+    console.error('加载病区概览失败:', err)
+  }
 }
 
 // 监听标签页
@@ -4480,6 +4520,80 @@ watch(showProfileEdit, (val) => {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.ward-stats-bar {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.stat-card {
+  flex: 1;
+  min-width: 130px;
+  text-align: center;
+  padding: 20px 12px;
+  border-radius: 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.stat-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.stat-icon {
+  font-size: 22px;
+}
+
+.stat-label {
+  font-size: 15px;
+  font-weight: 500;
+  color: #64748b;
+}
+
+.stat-num {
+  font-size: 32px;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 12px 0 10px;
+}
+
+.stat-change {
+  font-size: 14px;
+  font-weight: 500;
+  margin-top: 8px;
+}
+
+.change-up {
+  color: #10b981;
+}
+
+.change-down {
+  color: #ef4444;
+}
+
+.change-label {
+  font-weight: normal;
+  color: #94a3b8;
+  margin-left: 2px;
+}
+
+.stat-num {
+  font-size: 28px;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 8px 0;
+}
+
+.stat-change {
+  font-size: 12px;
+  margin-top: 8px;
 }
 
 </style>

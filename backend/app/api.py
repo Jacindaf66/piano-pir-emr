@@ -2377,4 +2377,83 @@ def discharge_patient(
     
     return {"success": True, "message": "已办理出院"}
 
+# ============ 病区概览统计 ==========
+@router.get("/stats/ward-overview")
+def get_ward_overview(
+    current_user: User = Depends(get_current_user_required),
+    db: Session = Depends(get_db)
+):
+    """获取病区概览数据（出院率、环比）"""
+    import sqlite3
+    import os
+    from datetime import date, timedelta
+    
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    DB_PATH = os.path.join(BASE_DIR, 'storage', 'hospital.db')
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # 获取当前用户科室
+    if current_user.role != Role.ADMIN:
+        dept_filter = current_user.department
+        dept_condition = "AND department = ?"
+        dept_param = [dept_filter]
+    else:
+        dept_condition = ""
+        dept_param = []
+    
+    today = date.today().isoformat()
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    
+    # 今日数据
+    cursor.execute(f"""
+        SELECT 
+            COUNT(*) as total,
+            SUM(CASE WHEN discharge_date IS NOT NULL AND discharge_date <= ? THEN 1 ELSE 0 END) as discharged
+        FROM records
+        WHERE 1=1 {dept_condition}
+    """, [today] + dept_param)
+    row = cursor.fetchone()
+    total_today = row[0] or 0
+    discharged_today = row[1] or 0
+    hospitalized_today = total_today - discharged_today
+    discharge_rate_today = round(discharged_today / total_today * 100, 1) if total_today > 0 else 0
+    
+    # 昨日数据
+    cursor.execute(f"""
+        SELECT 
+            COUNT(*) as total,
+            SUM(CASE WHEN discharge_date IS NOT NULL AND discharge_date <= ? THEN 1 ELSE 0 END) as discharged
+        FROM records
+        WHERE 1=1 {dept_condition}
+    """, [yesterday] + dept_param)
+    row = cursor.fetchone()
+    total_yesterday = row[0] or 0
+    discharged_yesterday = row[1] or 0
+    discharge_rate_yesterday = round(discharged_yesterday / total_yesterday * 100, 1) if total_yesterday > 0 else 0
+    
+    conn.close()
+    
+    # 计算变化
+    total_change = total_today - total_yesterday
+    discharged_change = discharged_today - discharged_yesterday
+    hospitalized_change = hospitalized_today - (total_yesterday - discharged_yesterday)
+    rate_change = round(discharge_rate_today - discharge_rate_yesterday, 1)
+    
+    return {
+        "today": {
+            "total": total_today,
+            "discharged": discharged_today,
+            "hospitalized": hospitalized_today,
+            "discharge_rate": discharge_rate_today
+        },
+        "changes": {
+            "total": total_change,
+            "discharged": discharged_change,
+            "hospitalized": hospitalized_change,
+            "discharge_rate": rate_change
+        }
+    }
+
 #
